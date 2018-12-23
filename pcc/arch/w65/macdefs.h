@@ -89,8 +89,8 @@ typedef unsigned long long U_CONSZ;
 typedef long long OFFSZ;
 
 #define CONFMT	"%lld"		/* format for printing constants */
-#define LABFMT	".L%d"		/* format for printing labels */
-#define STABLBL ".LL%d"		/* format for stab (debugging) labels */
+#define LABFMT	"L%d"		/* format for printing labels */
+#define STABLBL "LL%d"		/* format for stab (debugging) labels */
 #ifdef LANG_F77
 #define BLANKCOMMON "_BLNK_"
 #define MSKIREG	 (M(TYSHORT)|M(TYLONG))

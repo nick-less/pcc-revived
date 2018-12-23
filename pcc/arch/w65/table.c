@@ -110,7 +110,7 @@ struct optab table[] = {
 /* char -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG|SNAME|SOREG,	TCHAR,
-	SCREG,			TLL,
+	SBREG,			TLL,
 		NCREG,	RESC1,
 		"	move.b AL,U1\n	extb.l U1\n"
 		"	smi A1\n	extb.l A1\n", },
@@ -118,14 +118,14 @@ struct optab table[] = {
 /* uchar -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG|SNAME|SOREG,	TUCHAR,
-	SCREG,			TLL,
+	SBREG,			TLL,
 		NCREG,	RESC1,
 		"	move.b AL,U1\n	and.l #255,U1\n	clr.l A1\n", },
 
 /* char -> float/(l)double */
 { SCONV,	INDREG,
 	SAREG,		TCHAR,
-	SDREG,		TFP,
+	SBREG,		TFP,
 		NDREG,	RESC1,
 		"	fmove.ZL AL,A1\n", },
 
@@ -167,7 +167,7 @@ struct optab table[] = {
 /* short -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG,		TSHORT,
-	SCREG,		TLL,
+	SBREG,		TLL,
 		NCREG,	RESC1,
 		"	move AL,U1\n	ext.l U1\n"
 		"	smi A1\n	extb.l A1\n", },
@@ -175,14 +175,14 @@ struct optab table[] = {
 /* ushort -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG|SNAME|SOREG,	TUSHORT,
-	SCREG,			TLL,
+	SBREG,			TLL,
 		NCREG,	RESC1,
 		"	move.l AL,U1\n	and.l #65535,U1\n	clr.l A1\n", },
 
 /* ushort -> float/(l)double */
 { SCONV,	INDREG,
 	SAREG|SNAME|SOREG,	TUSHORT,
-	SAREG|SDREG,		TFP,
+	SBREG,		TFP,
 		NAREG|NDREG|NDSL,	RESC2,
 		"	move.w AL,A1\n	and.l #65535,A1\n"
 		"	fmove.l A1,A2\n", },
@@ -211,14 +211,14 @@ struct optab table[] = {
 /* int -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG|SOREG|SNAME,	TINT,
-	SCREG,			TLL,
+	SBREG,			TLL,
 		NCREG,	RESC1,
 		"	move.l AL,U1\n	smi A1\n	extb.l A1\n", },
 
 /* (u)int -> (u)longlong */
 { SCONV,	INCREG,
 	SAREG|SOREG|SNAME,	TUNSIGNED,
-	SCREG,			TLL,
+	SBREG,			TLL,
 		NCREG,	RESC1,
 		"	move.l AL,U1\n	clr.l A1\n", },
 
@@ -226,15 +226,15 @@ struct optab table[] = {
 
 /* (u)longlong -> (u)char/(u)short/(u)int */
 { SCONV,	INAREG,
-	SCREG|SOREG|SNAME,	TLL,
+	SBREG|SOREG|SNAME,	TLL,
 	SAREG,			TAREG,
 		NAREG,	RESC1,
 		"	movl UL,A1\n", },
 
 /* (u)longlong to (u)longlong */
 { SCONV,	INCREG,
-	SCREG,	TLL,
-	SCREG,	TLL,
+	SBREG,	TLL,
+	SBREG,	TLL,
 		0,	RLEFT,
 		"", },
 
@@ -245,7 +245,12 @@ struct optab table[] = {
 	SAREG|SNAME|SOREG,	TAREG,
 	SAREG|SNAME|SOREG,	TAREG,
 		0,	0,
-		"	move.ZA AR,AL; (AR/AL)0\n", },
+		"	ZI\n"
+		"	lda AR\n"
+		"	sta AL\n"
+		";	move.ZA AR,AL; (AR/AL)0\n"
+		,
+		},
 
 { ASSIGN,	FOREFF,
 	SBREG|SNAME|SOREG,	TPOINT,
@@ -286,62 +291,14 @@ struct optab table[] = {
 	SBREG|SNAME|SOREG|SCON,		TWORD|TPOINT,
 	SAREG,				TWORD,
 		0,	0,
-		"	add.l AR,AL\n", },
+		"	add.l AR,AL; 1\n", },
 
 { PLUS, FOREFF|INBREG,
 	SBREG,			TPOINT,
 	SAREG|SNAME|SOREG|SCON, TWORD,
 		0,	RLEFT|RESCC,
-		"	add.l AR,AL\n", },
+		"	add.l AR,AL; 2\n", },
 
-{ PLUS, FOREFF|INDREG,
-	SDREG,		TFP,
-	SNAME|SOREG|SCON, TFP,
-		0,	RLEFT|RESCC,
-		"	fadd.ZA AR,AL\n", },
-
-{ PLUS, FOREFF|INDREG,
-	SDREG,	TFP,
-	SDREG,	TFP,
-		0,	RLEFT|RESCC,
-		"	fadd.x AR,AL\n", },
-
-{ PLUS, FOREFF|INCREG|RESCC,
-	SCREG,	TLL,
-	SCREG,	TLL,
-		0,	RLEFT|RESCC,
-		"	add.l UR,UL\n	addx.l AR,AL\n", },
-
-{ PLUS,		INAREG|FOREFF,
-	SBREG|SNAME|SOREG,	TLL|TPOINT,
-	SONE,	TANY,
-		0,	RLEFT,
-		"	incq AL\n", },
-
-{ PLUS,		INAREG|FOREFF,
-	SBREG|SNAME|SOREG,	TWORD,
-	SONE,	TANY,
-		0,	RLEFT,
-		"	incl AL\n", },
-
-{ PLUS,		INAREG,
-	SBREG,	TLL|TPOINT,
-	SCON,	TWORD,
-		NAREG|NASL,	RESC1,
-		"	leaq CR(AL),A1\n", },
-
-
-{ PLUS,		INAREG|FOREFF,
-	SBREG|SNAME|SOREG,	TSHORT|TUSHORT,
-	SONE,	TANY,
-		0,	RLEFT,
-		"	incw AL\n", },
-
-{ PLUS,		INAREG|FOREFF,
-	SBREG|SNAME|SOREG,	TCHAR|TUCHAR,
-	SONE,	TANY,
-		0,	RLEFT,
-		"	incb AL\n", },
 
 // { PLUS, FOREFF | INBREG, SBREG, TANY, SBREG, TANY, RLEFT|RESCC, 0, "aha",},
 		
@@ -364,23 +321,6 @@ struct optab table[] = {
 		0,	RLEFT|RESCC,
 		"	sub.l AR,AL\n", },
 
-{ MINUS, FOREFF|INDREG,
-	SDREG,			TFP,
-	SNAME|SOREG|SCON, TFP,
-		0,	RLEFT|RESCC,
-		"	fsub.ZA AR,AL\n", },
-
-{ MINUS, FOREFF|INDREG,
-	SDREG,	TFP,
-	SDREG,	TFP,
-		0,	RLEFT|RESCC,
-		"	fsub.x AR,AL\n", },
-
-{ MINUS, FOREFF|INCREG|RESCC,
-	SCREG,	TLL,
-	SCREG,	TLL,
-		0,	RLEFT|RESCC,
-		"	sub.l UR,UL\n	subx.l AR,AL\n", },
 
 /* two pointers give a scalar */
 { MINUS,	INAREG|FORCC,
@@ -389,43 +329,18 @@ struct optab table[] = {
 		NAREG,	RESC1|RESCC,
 		"	move.l AL,A1\n	sub.l AR,A1\n", },
 
-/* Hack to allow for opsimp later down */
-/* Fortunately xor is not that common */
-{ ER,	FOREFF|INAREG,
-	SAREG,				TAREG,
-	SNAME|SOREG|SCON,		TAREG,
-		NAREG,	RLEFT|RESCC,
-		"	move.ZA AR,A1\n	eor.ZA A1,AL\n", },
-
-{ ER,	FOREFF|INCREG|FORCC,
-	SCREG|SNAME|SOREG|SCON,		TLL,
-	SCREG,				TLL,
-		0,	RLEFT|RESCC,
-		"	eor.l AR,AL\n	eor.l UR,UL\n", },
-
-{ AND,	FOREFF|INCREG|FORCC,
-	SCREG,				TLL,
-	SCREG|SNAME|SOREG|SCON,		TLL,
-		0,	RLEFT|RESCC,
-		"	and.l AR,AL\n	and.l UR,UL\n", },
-
-{ OR,	FOREFF|INCREG|FORCC,
-	SCREG,				TLL,
-	SCREG|SNAME|SOREG|SCON,		TLL,
-		0,	RLEFT|RESCC,
-		"	or.l AR,AL\n	or.l UR,UL\n", },
-
+/* operators add/dec/and/or/xor */
 { OPSIMP,	FOREFF|INAREG,
 	SAREG,				TAREG,
 	SAREG|SNAME|SOREG|SCON,		TAREG,
 		0,	RLEFT|RESCC,
-		"	Oz.ZA AR,AL\n", },
+		"	O  AR\n", },
 
 { OPSIMP,	FOREFF,
 	SAREG|SNAME|SOREG,	TAREG,
 	SAREG,			TAREG,
 		0,	RLEFT|RESCC,
-		"	Oz.ZA AR,AL\n", },
+		"	O  AR\n", },
 
 /*
  * Negate a word.
@@ -481,18 +396,20 @@ struct optab table[] = {
  * Leaf movements
  */
 
-
 { OPLTYPE,	INAREG,
 	SANY,	TANY,
 	SAREG|SCON|SOREG|SNAME, TAREG,
 		NAREG|NASL,	RESC1,
-		"	stA1 AL ;leafm 1\n", },
+		"	ZI\n	ldA1 AL ;leafm 1\n"
+		, },
 
 { OPLTYPE,	INBREG,
 	SANY,	TANY,
 	SBREG|SCON|SOREG|SNAME, TPOINT,
 		NBREG|NBSL,	RESC1,
 		"	move.l AL,A1 ;leafm 2\n", },
+
+
 
 
 
@@ -584,7 +501,7 @@ struct optab table[] = {
 	SCON,	TANY,
 	SANY,	TANY,
 		0,	0,
-		"	jsr CL\nZB;2 ", },
+		"	jsr CL;2\nZB ", },
 
 { UCALL,	FOREFF,
 	SBREG,	TANY,
@@ -744,7 +661,7 @@ struct optab table[] = {
 	SCON,	TPOINT,
 	SANY,	TANY,
 		0,	RNULL,
-		"	pea CL\n", },
+		"	lda #(CL) ;\n", },
 
 { FUNARG,	FOREFF,
 	SCON|SABREG|SNAME,	TWORD|TPOINT,

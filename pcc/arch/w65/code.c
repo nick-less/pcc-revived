@@ -82,7 +82,7 @@ defloc(struct symtab *sp)
 		printf("\t.global %s\n", name);
 		if (ISFTN(sp->stype)) {
 			printf(";\t.type %s,@function\n", name);
-			printf("proc %s: near\n", name);
+			printf(".proc %s: near\n", name);
 		} else {
 			printf(";\t.type %s,@object\n", name);
 			printf(";\t.size %s,%d\n", name,
@@ -184,6 +184,12 @@ void ejobcode(int flag) {
 void bjobcode(void) { 
 	printf("\t.fopt compiler,\"PCC: %s\"\n", VERSSTR);
 
+
+	printf(".P816\n");
+	printf(".A16\n");
+	printf(".I16\n");
+
+	printf("	.importzp	zp1l, zp2l, zp3l, zp4l\n");
 
 	/* Set correct names for our types */
 	astypnames[SHORT] = astypnames[USHORT] = "\t.word";

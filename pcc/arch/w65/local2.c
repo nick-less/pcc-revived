@@ -29,6 +29,7 @@
 # include <string.h>
 
 static int stkpos;
+static int regm, regf, fpsub, nfp;
 
 /**
  * ca65 has no .file directive so overwrite  printdotfile to disable ".file"
@@ -36,17 +37,12 @@ static int stkpos;
 void printdotfile(char *file) {
 }
 
-void
-deflab(int label)
-{
+void deflab(int label) {
 	printf(LABFMT ":\n", label);
 }
 
-static int regm, regf, fpsub, nfp;
 
-void
-prologue(struct interpass_prolog *ipp)
-{
+void prologue(struct interpass_prolog *ipp) {
 	/*
 	 * Subtract both space for automatics and permanent regs.
 	 * XXX - no struct return yet.
@@ -59,8 +55,8 @@ prologue(struct interpass_prolog *ipp)
 	regm = regf = nfp = 0;
 	fpsub += 4;
 
-	printf(";	link.%c %%fp,#%d;;prologue\n", fpsub > 32768 ? 'l' : 'w', -fpsub);
-	printf("	lda zpl4	; load old fp\n");
+//	printf(";	link.%c %%fp,#%d;;prologue\n", fpsub > 32768 ? 'l' : 'w', -fpsub);
+	printf("	lda zp4l	; load old fp\n");
 	printf("	pha	; save old fp\n");
 	printf("	tsx ; get stackptr\n");
 	printf("	stx zp4l ;store to fp\n");
@@ -71,13 +67,13 @@ void eoftn(struct interpass_prolog *ipp) {
 	if (ipp->ipp_ip.ip_lbl == 0)
 		return; /* no code needs to be generated */
 
-	printf(";	unlk %% ;;interpass_prolog\n");
+//	printf(";	unlk %% ;;interpass_prolog\n");
 	printf("	ldx	zp4l	;load fp\n");
 	printf("	tsx		;stack is now like after\n");
 	printf("	plx		;get old fp\n");
 	printf("	stx zp4l ;store to fp\n");
 	printf("	rts\n");
-	printf(".endproc\n");
+	printf(".endproc\n\n");
 }
 
 /*
@@ -85,23 +81,21 @@ void eoftn(struct interpass_prolog *ipp) {
  *
  * Param given:
  */
-void
-hopcode(int f, int o)
-{
+void hopcode(int f, int o) {
 	char *str;
 
 	switch (o) {
 	case PLUS:
-		str = "add";
+		str = "adc";
 		break;
 	case MINUS:
-		str = "sub";
+		str = "sbc";
 		break;
 	case AND:
 		str = "and";
 		break;
 	case OR:
-		str = "or";
+		str = "ora";
 		break;
 	case ER:
 		str = "eor";
@@ -116,9 +110,7 @@ hopcode(int f, int o)
 /*
  * Return type size in bytes.  Used by R2REGS, arg 2 to offset().
  */
-int
-tlen(NODE *p)
-{
+int tlen(NODE *p) {
 	switch(p->n_type) {
 		case CHAR:
 		case UCHAR:
@@ -158,9 +150,7 @@ int fldexpand(NODE *p, int cookie, char **cp) {
 	return 0;
 }
 
-static void
-starg(NODE *p)
-{
+static void starg(NODE *p) {
 	int sz = attr_find(p->n_ap, ATTR_P2STRUCT)->iarg(0);
 	int subsz = (sz + 3) & ~3;
 	int fr, tr, cr;
@@ -201,13 +191,20 @@ starg(NODE *p)
   * gets called from expand (code), when Z is encountered
   *
   */
-void
-zzzcode(NODE *p, int c)
-{
+void zzzcode(NODE *p, int c) {
 	TWORD t = p->n_type;
 	char *s;
+	NODE *r ;
+	unsigned short int ival;
 
 	switch (c) {
+	case 'I': // indexed access;
+		r = getlr( p, 'L' );
+		if (getlval(r)) {
+			ival = getlval(r);
+			printf("ldx #$%x",  ival);
+		}
+		break;
 	case 'R': // output based on register
 		break;
 	case 'L':
@@ -224,7 +221,7 @@ zzzcode(NODE *p, int c)
 
 	case 'B':
 		if (p->n_qual)
-			printf("	add.l #%d,%%sp\n", (int)p->n_qual);
+			printf("	add.l #%d,%%sp ; (ZB)\n", (int)p->n_qual);
 		break;
 
 
@@ -251,7 +248,7 @@ zzzcode(NODE *p, int c)
 		expand(p, INAREG, "	move.l AR,-(%sp)\n");
 		expand(p, INAREG, "	move.l AL,-(%sp)\n");
 		printf("	jsr memcpy\n");
-		printf("	add.l #12,%%sp\n");
+		printf("	add.l #12,%%sp ;\n");
 		break;
 
 	case 'S': /* struct arg */
@@ -270,9 +267,7 @@ zzzcode(NODE *p, int c)
 
 #if 0
 int canaddr(NODE *);
-int
-canaddr(NODE *p)
-{
+int canaddr(NODE *p) {
 	int o = p->n_op;
 
 	if (o==NAME || o==REG || o==ICON || o==OREG ||
@@ -285,18 +280,14 @@ canaddr(NODE *p)
 /*
  * Does the bitfield shape match?
  */
-int
-flshape(NODE *p)
-{
+int flshape(NODE *p) {
 	comperr("flshape");
 	return(0);
 }
 
 /* INTEMP shapes must not contain any temporary registers */
 /* XXX should this go away now? */
-int
-shtemp(NODE *p)
-{
+int shtemp(NODE *p) {
 	return 0;
 #if 0
 	int r;
@@ -328,15 +319,11 @@ shtemp(NODE *p)
 #endif
 }
 
-void
-adrcon(CONSZ val)
-{
+void adrcon(CONSZ val) {
 	printf("#" CONFMT, val);
 }
 
-void
-conput(FILE *fp, NODE *p)
-{
+void conput(FILE *fp, NODE *p) {
 	long val = getlval(p);
 
 	if (p->n_type <= UCHAR)
@@ -357,9 +344,7 @@ conput(FILE *fp, NODE *p)
 }
 
 /*ARGSUSED*/
-void
-insput(NODE *p)
-{
+void insput(NODE *p) {
 	comperr("insput");
 }
 
@@ -367,9 +352,7 @@ insput(NODE *p)
  * Write out the upper address, like the upper register of a 2-register
  * reference, or the next memory location.
  */
-void
-upput(NODE *p, int size)
-{
+void upput(NODE *p, int size) {
 	switch (p->n_op) {
 	case REG:
 		printf("%%%s", &rnames[p->n_rval][2]);
@@ -390,29 +373,35 @@ upput(NODE *p, int size)
 	}
 }
 
+/**
+ * output address 
+ */
 void adrput(FILE *io, NODE *p) {
 	int r;
 
 	/* output an address, with offsets, from p */
 	switch (p->n_op) {
 	case NAME:
-		if (getlval(p))
-			fprintf(io, CONFMT "%s", getlval(p),
-			    *p->n_name ? "+" : "");
-		if (p->n_name[0])
+	    // 65816 has no displacement, muss load x instead
+		// if (getlval(p))
+		// 	fprintf(io, CONFMT "%s", getlval(p),
+		// 	    *p->n_name ? "+" : "");
+		if (p->n_name[0]) {
 			printf("%s", p->n_name);
-		else
+		} else {
 			comperr("adrput");
+		}
 		return;
 
 	case OREG:
 		r = p->n_rval;
 		// this is the place where variables on the stack a accesses
 
-		if (getlval(p)) {
-			fprintf(io, CONFMT "%s", getlval(p),
-			    *p->n_name ? "+" : "");
-		}
+	    // 65816 has no displacement, muss load x instead
+		// if (getlval(p)) {
+		// 	fprintf(io, CONFMT "%s", getlval(p),
+		// 	    *p->n_name ? "+" : "");
+		// }
 		if (p->n_name[0]) {
 			printf("%s", p->n_name);
 		}
@@ -425,7 +414,11 @@ void adrput(FILE *io, NODE *p) {
 			    r1 == MAXREGS ? "" : rnames[r1],
 			    r2 == MAXREGS ? "" : rnames[r2], sh);
 		} else {
-			fprintf(io, "(%s)", rnames[p->n_rval]);
+			if (getlval(p)) {
+				fprintf(io, "(%s,x)", rnames[p->n_rval]);
+			} else {
+				fprintf(io, "(%s)", rnames[p->n_rval]);
+			}
 		}
 		return;
 	case ICON:
@@ -447,7 +440,11 @@ void adrput(FILE *io, NODE *p) {
 		// 	    rnames[p->n_rval][1]);
 				
 		// } else
+		if (getlval(p)) {
+			fprintf(io, "%s,x", rnames[p->n_rval]);
+		} else {
 			fprintf(io, "%s", rnames[p->n_rval]);
+		}
 		return;
 
 	default:
@@ -473,26 +470,20 @@ ccbranches[] = {
 
 
 /*   printf conditional and unconditional branches */
-void
-cbgen(int o, int lab)
-{
+void cbgen(int o, int lab) {
 	if (o < EQ || o > UGT)
 		comperr("bad conditional branch: %s", opst[o]);
 	printf("	%s " LABFMT "\n", ccbranches[o-EQ], lab);
 }
 
-static void
-mkcall(NODE *p, char *name)
-{
+static void mkcall(NODE *p, char *name) {
 	p->n_op = CALL;
 	p->n_right = mkunode(FUNARG, p->n_left, 0, p->n_left->n_type);
 	p->n_left = mklnode(ICON, 0, 0, FTN|p->n_type);
 	p->n_left->n_name = name;
 }
 
-static void
-mkcall2(NODE *p, char *name)
-{
+static void mkcall2(NODE *p, char *name) {
 	p->n_op = CALL;
 	p->n_right = mkunode(FUNARG, p->n_right, 0, p->n_right->n_type);
 	p->n_left = mkunode(FUNARG, p->n_left, 0, p->n_left->n_type);
@@ -502,9 +493,7 @@ mkcall2(NODE *p, char *name)
 }
 
 
-static void
-fixcalls(NODE *p, void *arg)
-{
+static void fixcalls(NODE *p, void *arg) {
 	struct attr *ap;
 	TWORD lt;
 
@@ -594,9 +583,7 @@ fixcalls(NODE *p, void *arg)
 	}
 }
 
-void
-myreader(struct interpass *ipole)
-{
+void myreader(struct interpass *ipole) {
 	struct interpass *ip;
 
 	stkpos = p2autooff;
@@ -616,9 +603,7 @@ myreader(struct interpass *ipole)
 /*
  * Remove some PCONVs after OREGs are created.
  */
-static void
-pconv2(NODE *p, void *arg)
-{
+static void pconv2(NODE *p, void *arg) {
 	NODE *q;
 
 	if (p->n_op == PLUS) {
@@ -639,20 +624,14 @@ pconv2(NODE *p, void *arg)
 	}
 }
 
-void
-mycanon(NODE *p)
-{
+void mycanon(NODE *p) {
 	walkf(p, pconv2, 0);
 }
 
-void
-myoptim(struct interpass *ip)
-{
+void myoptim(struct interpass *ip) {
 }
 
-void
-rmove(int s, int d, TWORD t)
-{
+void rmove(int s, int d, TWORD t) {
 
 	if (t >= FLOAT && t <= TDOUBLE)
 		printf("	fmove.x %s,%s\n", rnames[s], rnames[d]);
@@ -664,9 +643,7 @@ rmove(int s, int d, TWORD t)
  * For class cc, find worst-case displacement of the number of
  * registers in the array r[] indexed by class.
  */
-int
-COLORMAP(int cc, int *r)
-{
+int COLORMAP(int cc, int *r) {
 	int a,c;
 
 	a = r[CLASSA];
@@ -701,9 +678,7 @@ char *rnames[] = {
 /*
  * Return a class suitable for a specific type.
  */
-int
-gclass(TWORD t)
-{
+int gclass(TWORD t) {
 	if (t > BTMASK)
 		return CLASSB;
 	if (t == LONGLONG || t == ULONGLONG)
@@ -713,19 +688,21 @@ gclass(TWORD t)
 	return CLASSA;
 }
 
-static int
-argsiz(NODE *p)
-{
+static int argsiz(NODE *p) {
 	TWORD t = p->n_type;
 
-	if (t < LONGLONG || t == FLOAT || t > BTMASK)
+	if (t < LONGLONG || t == FLOAT || t > BTMASK) {
 		return 4;
-	if (t == LONGLONG || t == ULONGLONG || t == DOUBLE)
+	}
+	if (t == LONGLONG || t == ULONGLONG || t == DOUBLE) {
 		return 8;
-	if (t == LDOUBLE)
+	}
+	if (t == LDOUBLE) {
 		return 12;
-	if (t == STRTY || t == UNIONTY)
+	}
+	if (t == STRTY || t == UNIONTY) {
 		return (attr_find(p->n_ap, ATTR_P2STRUCT)->iarg(0)+3) & ~3;
+	}
 	comperr("argsiz");
 	return 0;
 }
@@ -733,9 +710,7 @@ argsiz(NODE *p)
 /*
  * Calculate argument sizes.
  */
-void
-lastcall(NODE *p)
-{
+void lastcall(NODE *p) {
 	NODE *op = p;
 	int size = 0;
 
@@ -751,26 +726,20 @@ lastcall(NODE *p)
 /*
  * Special shapes.
  */
-int
-special(NODE *p, int shape)
-{
+int special(NODE *p, int shape) {
 	return SRNOPE;
 }
 
 /*
  * Target-dependent command-line options.
  */
-void
-mflags(char *str)
-{
+void mflags(char *str) {
 }
 
 /*
  * Do something target-dependent for xasm arguments.
  */
-int
-myxasm(struct interpass *ip, NODE *p)
-{
+int myxasm(struct interpass *ip, NODE *p) {
 	int cw = xasmcode(p->n_name);
 	int ww;
 	char *w;
@@ -800,9 +769,7 @@ again:	switch (ww) {
 /*
  * Handle special characters following % in gcc extended assembler.
  */
-int
-targarg(char *w, void *arg)
-{
+int targarg(char *w, void *arg) {
 	switch (w[1]) {
 	case '.': /* Remove dot if not needed */
 		printf(".");
