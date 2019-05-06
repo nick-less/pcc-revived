@@ -1,4 +1,4 @@
-/*	$Id: cpp.c,v 1.304 2017/12/11 10:36:20 ragge Exp $	*/
+/*	$Id: cpp.c,v 1.306 2019/04/01 15:21:57 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2010 Anders Magnusson (ragge@ludd.luth.se).
@@ -657,12 +657,16 @@ addidir(char *idir, struct incs **ww)
 void
 line(void)
 {
+	extern int instr;
 	struct iobuf *ib, *ob;
 	usch *inp;
-	int n, ln;
+	int n, ln, oidx;
 
+	oidx = ifiles->idx;
+	instr = 1;
 	ob = savln();
 	ob->cptr = 0;
+	instr = 0;
 	exparg(1, ob, ib = getobuf(BNORMAL), NULL);
 	inp = ib->buf;
 
@@ -704,12 +708,21 @@ line(void)
 	while (ISWSNL(*inp))
 		inp++;
 
+	if (*inp == 0)
+		goto out;
+
+	if (*inp < '0' || *inp > '9')
+		goto bad;
+
+	if (*inp++ == '3')
+		ifiles->idx = SYSINC;
+
 	if (*inp != 0)
 		goto bad;
 
-
 out:	ifiles->lineno = ln;
 	prtline(1);
+	ifiles->idx = oidx;
 	ifiles->lineno--;
 	bufree(ob);
 	bufree(ib);
@@ -782,7 +795,7 @@ fsrch(const usch *fn, int idx, struct incs *w)
 		if (i > idx)
 			w = incdir[i];
 		for (; w; w = w->next) {
-			int len = strlen((char *)w->dir) + strlen((char *)fn) + 2; /* '/' + \0 */
+			size_t len = strlen((char *)w->dir) + strlen((char *)fn) + 2; /* '/' + \0 */
 			char *f = xmalloc(len);
 			snprintf(f, len, "%s/%s", w->dir, fn);
 			if (pushfile((usch *)f, fn, i, w->next) == 0)

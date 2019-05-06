@@ -1,4 +1,4 @@
-/*	$Id: macdefs.h,v 1.12 2017/01/17 13:12:13 ragge Exp $	*/
+/*	$Id: macdefs.h,v 1.17 2019/04/22 09:21:55 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -98,7 +98,7 @@ typedef	long long CONSZ;
 typedef	unsigned long long U_CONSZ;
 typedef long long OFFSZ;
 
-#define CONFMT	"%lld"		/* format for printing constants */
+#define CONFMT	"%llo"		/* format for printing constants */
 #define LABFMT	"L%d"		/* format for printing labels */
 #ifdef LANG_F77
 #define BLANKCOMMON "_BLNK_"
@@ -117,7 +117,6 @@ typedef long long OFFSZ;
 #define TARGET_ENDIAN TARGET_LE /* XXX TARGET_PDP */
 #define	MYINSTRING
 #define	MYALIGN
-#define	TARGET_ISMATH		/* need private versions of these */
 
 /* Definitions mostly used in pass2 */
 
@@ -129,12 +128,14 @@ typedef long long OFFSZ;
 #define STOSTARG(p)
 
 #define	FINDMOPS	/* pdp11 has instructions that modifies memory */
+#define	MYDOTFILE
+#define	printdotfile(x)
 
 #define szty(t) ((t) == DOUBLE || (t) == LONGLONG || (t) == ULONGLONG ? 4 : \
 	(t) == FLOAT || (t) == LONG || (t) == ULONG ? 2 : 1)
 
 /*
- * The pdp11 has 3 register classes, 16-bit, 32-bit and floats.
+ * The pdp11 has 4 register classes, 16-bit, 32-bit, floats and 64-bit.
  * Class membership and overlaps are defined in the macros RSTATUS
  * and ROVERLAP below.
  *
@@ -142,6 +143,7 @@ typedef long long OFFSZ;
  *	A - 16-bit
  *	B - 32-bit (concatenated 16-bit)
  *	C - floating point
+ *	D - 64-bit (on stack, emulated)
  */
 #define	R0	000	/* Scratch and return register */
 #define	R1	001	/* Scratch and secondary return register */
@@ -166,12 +168,18 @@ typedef long long OFFSZ;
 #define	FR6	026
 #define	FR7	027
 
-#define	MAXREGS	030	/* 24 registers */
+#define	LL0	030
+#define	LL1	031
+#define	LL2	032
+#define	LL3	033
+
+#define	MAXREGS	034	/* 28 registers */
 
 #define	RSTATUS	\
 	SAREG|TEMPREG, SAREG|TEMPREG, SAREG, SAREG, SAREG, 0, 0, 0, \
 	SBREG, SBREG, SBREG, SBREG, 0, 0, 0, 0,		\
-	SCREG, SCREG, SCREG, SCREG, 0, 0, 0, 0
+	SCREG|TEMPREG, SCREG|TEMPREG, SCREG|TEMPREG, SCREG|TEMPREG, 0, 0, 0, 0,		\
+	SDREG, SDREG, SDREG, SDREG,
 
 #define	ROVERLAP \
 	/* 8 basic registers */\
@@ -202,7 +210,13 @@ typedef long long OFFSZ;
 	{ -1 },\
 	{ -1 },\
 	{ -1 },\
-	{ -1 },
+	{ -1 },\
+\
+	/* Neither the four emulated long long regs */\
+	{ -1 },\
+	{ -1 },\
+	{ -1 },\
+	{ -1 }
 
 
 /* Return a register class based on the type of the node */
@@ -213,14 +227,15 @@ typedef long long OFFSZ;
 #define	NUMCLASS 	3	/* highest number of reg classes used */
 
 int COLORMAP(int c, int *r);
-#define	GCLASS(x) (x < 8 ? CLASSA : x < 16 ? CLASSB : CLASSC)
+#define	GCLASS(x) (x < 8 ? CLASSA : x < 16 ? CLASSB : x < 24 ? CLASSC : CLASSD)
 #define DECRA(x,y)	(((x) >> (y*5)) & 31)	/* decode encoded regs */
 #define	ENCRD(x)	(x)		/* Encode dest reg in n_reg */
 #define ENCRA1(x)	((x) << 5)	/* A1 */
 #define ENCRA2(x)	((x) << 10)	/* A2 */
 #define ENCRA(x,y)	((x) << (5+y*5))	/* encode regs in int */
 #define	RETREG(x)	((x) == LONG || (x) == ULONG ? R01 : \
-	(x) == FLOAT || (x) == DOUBLE ? FR0 : R0)
+	(x) == FLOAT || (x) == DOUBLE ? FR0 : \
+	(x) == LONGLONG || (x) == ULONGLONG ? LL0: R0)
 
 //#define R2REGS	1	/* permit double indexing */
 
@@ -234,3 +249,7 @@ int COLORMAP(int c, int *r);
 #define	SINCW		(MAXSPECIAL+3)	/* post-increment */
 #define	SARGSUB		(MAXSPECIAL+4)	/* arg pointer to array */
 #define	SARGINC		(MAXSPECIAL+5)	/* post-increment arg */
+
+/* floating point definitions */
+#define	FDFLOAT
+#define	DEFAULT_FPI_DEFS { &fpi_ffloat, &fpi_dfloat, &fpi_dfloat }

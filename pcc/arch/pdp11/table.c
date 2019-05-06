@@ -1,4 +1,4 @@
-/*	$Id: table.c,v 1.5 2008/10/19 15:25:25 ragge Exp $	*/
+/*	$Id: table.c,v 1.17 2019/04/27 20:35:52 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -50,32 +50,90 @@ struct optab table[] = {
 		0,	RLEFT,
 		"", },
 
-/* convert char to int or unsigned */
+/* long -> ptr */
+{ PCONV,	INAREG,
+	SBREG|SOREG|SNAME,	TLONG|TULONG,
+	SAREG,			TPOINT,
+		NAREG|NASL,	RESC1,
+		"mov	UL,A1\n", },
+
+/* convert uchar to char; sign-extend byte */
+{ SCONV,	INAREG,
+	SAREG,	TUCHAR,
+	SAREG,	TCHAR,
+		0,	RLEFT,
+		"movb	AL,AL\n", },
+
+/* convert char to uchar; zero-extend byte */
+{ SCONV,	INAREG,
+	SAREG,	TCHAR,
+	SAREG,	TUCHAR,
+		0,	RLEFT,
+		"bic	$177400,AL\n", },
+
+/* convert char to int or unsigned.  Already so in regs */
 { SCONV,	INAREG,
 	SAREG,	TCHAR,
 	SAREG,	TINT|TUNSIGNED,
-		NAREG|NASL,	RESC1,
-		"", }, /* chars are stored as ints in registers */
+		0,	RLEFT,
+		"", },
 
+/* char (in mem) to (u)int */
 { SCONV,	INAREG,
 	SOREG|SCON|SNAME,	TCHAR,
 	SAREG,	TINT,
 		NAREG|NASL,	RESC1,
 		"movb	AL,A1\n", },
 
-/* convert uchar to int or unsigned */
+/* convert uchar to (u)int in reg */
+/* Nothing to do since reg is already large enough */
 { SCONV,	INAREG,
-	SAREG|SOREG|SCON|SNAME,	TUCHAR,
+	SAREG,	TUCHAR,
+	SAREG,	TINT|TUNSIGNED,
+		0,	RLEFT,
+		"", },
+
+/* convert uchar to (u)int from mem */
+{ SCONV,	INAREG,
+	SOREG|SNAME,	TUCHAR,
 	SAREG,	TINT|TUNSIGNED,
 		NAREG,	RESC1,
 		"clr	A1\nbisb	AL,A1\n", },
 
-/* convert (u)int to (u)char.  Nothing to do. */
+/* convert char to (u)long */
+{ SCONV,	INBREG,
+	SAREG|SOREG|SCON|SNAME,	TCHAR,
+	SANY,	TULONG|TLONG,
+		NBREG,	RESC1,
+		"movb	AL,U1\nsxt	A1\n", },
+
+/* convert uchar to ulong */
+{ SCONV,	INBREG,
+	SAREG,	TUCHAR,
+	SANY,	TLONG|TULONG,
+		NBREG|NBSL,	RESC1,
+		"mov	AL,U1\nclr	A1\n", },
+
+/* (u)char -> float/double */
+{ SCONV,	INCREG,
+	SAREG,	TCHAR|TUCHAR,
+	SANY,	TFLOAT|TDOUBLE,
+		NCREG,	RESC1,
+		"movif	AL,A1\n", },
+
+/* convert (u)int to char */
 { SCONV,	INAREG,
 	SAREG,	TWORD,
-	SANY,	TCHAR|TUCHAR,
+	SANY,	TCHAR,
 		0,	RLEFT,
-		"", },
+		"movb	AL,AL\n", },
+
+/* convert (u)int to uchar  */
+{ SCONV,	INAREG,
+	SAREG,	TWORD,
+	SANY,	TUCHAR,
+		NAREG,	RESC1,
+		"clr	A1\nbisb	AL,A1\n", },
 
 /* convert (u)int to (u)int */
 { SCONV,	INAREG,
@@ -83,6 +141,13 @@ struct optab table[] = {
 	SANY,	TWORD,
 		0,	RLEFT,
 		"", },
+
+/* convert pointer to char */
+{ SCONV,	INAREG,
+	SAREG,	TPOINT,
+	SANY,	TCHAR,
+		0,	RLEFT,
+		"movb	AL,AL\n", },
 
 /* convert pointer to (u)int */
 { SCONV,	INAREG,
@@ -100,10 +165,18 @@ struct optab table[] = {
 
 /* int -> (u)long. XXX - only in r0 and r1 */
 { SCONV,	INBREG,
-	SAREG,	TINT,
+	SAREG,	TINT|TPOINT,
 	SANY,	TLONG|TULONG,
 		NSPECIAL|NBREG|NBSL,	RESC1,
 		"tst	AL\nsxt	r0\n", },
+
+/* int -> float/double */
+{ SCONV,	INCREG,
+	SAREG|SNAME|SOREG,	TINT,
+	SANY,	TFLOAT|TDOUBLE,
+		NCREG,	RESC1,
+		"movif	AL,A1\n", },
+
 
 /* unsigned -> (u)long. XXX - only in r0 and r1 */
 { SCONV,	INBREG,
@@ -120,13 +193,26 @@ struct optab table[] = {
 		"mov	AL,-(sp)\nclr	-(sp)\n"
 		"setl\nmovif	(sp)+,A1\nseti\n", },
 
+/* (u)long -> char */
+{ SCONV,	INAREG,
+	SBREG|SOREG|SNAME,	TLONG|TULONG,
+	SAREG,			TCHAR,
+		NAREG|NASL,	RESC1,
+		"movb	UL,A1\n", },
+
+/* (u)long -> uchar */
+{ SCONV,	INAREG,
+	SBREG|SOREG|SNAME,	TLONG|TULONG,
+	SAREG,			TUCHAR,
+		NAREG|NASL,	RESC1,
+		"clr	A1\nbisb	UL,A1\n", },
+
 /* long -> int */
 { SCONV,	INAREG,
 	SBREG|SOREG|SNAME,	TLONG|TULONG,
 	SAREG,			TWORD,
 		NAREG|NASL,	RESC1,
 		"mov	UL,A1\n", },
-
 
 /* (u)long -> (u)long, nothing */
 { SCONV,	INBREG,
@@ -135,7 +221,7 @@ struct optab table[] = {
 		NBREG|NBSL,	RESC1,
 		"", },
 
-/* long -> double */
+/* long -> float/double */
 { SCONV,	INCREG,
 	SBREG|SNAME|SOREG|SCON,	TLONG,
 	SANY,		TFLOAT|TDOUBLE,
@@ -143,43 +229,122 @@ struct optab table[] = {
 		"mov	UL,-(sp)\nmov	AL,-(sp)\n"
 		"setl\nmovif	(sp)+,A1\nseti\n", },
 
+/* ulong -> float/double */
+{ SCONV,	INCREG,
+	SBREG|SNAME|SOREG|SCON,	TULONG,
+	SANY,		TFLOAT|TDOUBLE,
+		NCREG|NCSL,	RESC1,
+		"mov	UL,(sp)\nmov	AL,-(sp)\n"
+		"jsr	pc,ultof\ntst	(sp)+\n", },
+
+/* float/double -> (u)long XXX - correct? */
+{ SCONV,	INBREG,
+	SCREG,	TFLOAT|TDOUBLE,
+	SANY,	TLONG|TULONG,
+		NBREG,	RESC1,
+		"setl\nmovfi	AL,-(sp)\nmov	(sp)+,A1\n"
+		"mov	(sp)+,U1\nseti\n", },
+
+/* double -> int*/
+{ SCONV,	INAREG,
+	SCREG,	TFLOAT|TDOUBLE,
+	SANY,	TINT,
+		NAREG,	RESC1,
+		"movfi	AL,A1\n", },
+
+/* float/double -> float/double */
+/* In regs. floating point always stored as double in regs */
+{ SCONV,	INCREG,
+	SCREG,	TFLOAT|TDOUBLE,
+	SANY,	TANY,
+		0,	RLEFT,
+		"", },
+
 /*
  * Subroutine calls.
  */
-{ CALL,		INBREG,
-	SCON,	TANY,
-	SBREG,	TLONG|TULONG,
-		NBREG|NBSL,	RESC1,
-		"jsr	pc,*CL\nZC", },
-
-{ UCALL,	INBREG,
-	SCON,	TANY,
-	SBREG,	TLONG|TULONG,
-		NBREG|NBSL,	RESC1,
-		"jsr	pc,*CL\n", },
-
-{ CALL,		FOREFF,
-	SCON|SNAME|SOREG,	TANY,
-	SANY,	TANY,
-		0,	0,
-		"jsr	pc,*AL\nZC", },
-
-{ UCALL,	FOREFF,
-	SCON|SNAME|SOREG,	TANY,
-	SANY,	TANY,
-		0,	0,
-		"jsr	pc,*AL\n", },
-
 { CALL,		INAREG,
-	SCON|SOREG|SNAME,	TANY,
+	SCON,	TANY,
 	SAREG,	TWORD|TPOINT|TCHAR|TUCHAR,
 		NAREG|NASL,	RESC1,
 		"jsr	pc,*AL\nZC", },
 
 { UCALL,	INAREG,
-	SCON|SOREG|SNAME,	TANY,
+	SCON,	TANY,
 	SAREG,	TWORD|TPOINT|TCHAR|TUCHAR,
 		NAREG|NASL,	RESC1,
+		"jsr	pc,*AL\n", },
+
+{ CALL,		INAREG,
+	SAREG,	TANY,
+	SANY,	TANY,
+		NAREG|NASL,	RESC1,	/* should be 0 */
+		"jsr	pc,(AL)\nZC", },
+
+{ UCALL,	INAREG,
+	SAREG,	TANY,
+	SANY,	TANY,
+		NAREG|NASL,	RESC1,	/* should be 0 */
+		"jsr	pc,(AL)\n", },
+
+{ CALL,		INBREG,
+	SCON,	TANY,
+	SBREG,	TLONG|TULONG,
+		NBREG|NBSL,	RESC1,
+		"jsr	pc,*AL\nZC", },
+
+{ UCALL,	INBREG,
+	SCON,	TANY,
+	SBREG,	TLONG|TULONG,
+		NBREG|NBSL,	RESC1,
+		"jsr	pc,*AL\n", },
+
+{ CALL,		INBREG,
+	SAREG,	TANY,
+	SBREG,	TLONG|TULONG,
+		NBREG|NBSL,	RESC1,
+		"jsr	pc,(AL)\nZC", },
+
+{ UCALL,	INBREG,
+	SAREG,	TANY,
+	SBREG,	TLONG|TULONG,
+		NBREG|NBSL,	RESC1,
+		"jsr	pc,(AL)\n", },
+
+{ CALL,		INCREG,
+	SCON,	TANY,
+	SCREG,	TFLOAT|TDOUBLE,
+		NCREG,	RESC1,
+		"jsr	pc,*AL\nZC", },
+
+{ UCALL,	INCREG,
+	SCON,	TANY,
+	SCREG,	TFLOAT|TDOUBLE,
+		NCREG,	RESC1,
+		"jsr	pc,*AL\n", },
+
+{ CALL,		INCREG,
+	SAREG,	TANY,
+	SCREG,	TFLOAT|TDOUBLE,
+		NCREG|NCSL,	RESC1,
+		"jsr	pc,(AL)\nZC", },
+
+{ UCALL,	INCREG,
+	SAREG,	TANY,
+	SCREG,	TFLOAT|TDOUBLE,
+		NCREG|NCSL,	RESC1,
+		"jsr	pc,(AL)\n", },
+
+{ CALL,		FOREFF,
+	SCON,	TANY,
+	SANY,	TANY,
+		0,	0,
+		"jsr	pc,*AL\nZC", },
+
+{ UCALL,	FOREFF,
+	SCON,	TANY,
+	SANY,	TANY,
+		0,	0,
 		"jsr	pc,*AL\n", },
 
 { CALL,		FOREFF,
@@ -194,13 +359,37 @@ struct optab table[] = {
 		0,	0,
 		"jsr	pc,(AL)\n", },
 
-{ CALL,		INAREG,
+{ STCALL,	INAREG,
+	SCON|SOREG|SNAME,	TANY,
+	SANY,	TANY,
+		NAREG|NASL,	RESC1,
+		"jsr	pc,*AL\nZC", },
+
+{ USTCALL,	INAREG,
+	SCON|SOREG|SNAME,	TANY,
+	SANY,	TANY,
+		NAREG|NASL,	RESC1,
+		"jsr	pc,*AL\n", },
+
+{ STCALL,	FOREFF,
+	SCON|SOREG|SNAME,	TANY,
+	SANY,	TANY,
+		0,	0,
+		"jsr	pc,*AL\nZC", },
+
+{ USTCALL,	FOREFF,
+	SCON|SOREG|SNAME,	TANY,
+	SANY,	TANY,
+		0,	0,
+		"jsr	pc,*AL\n", },
+
+{ STCALL,	INAREG,
 	SAREG,	TANY,
 	SANY,	TANY,
 		NAREG|NASL,	RESC1,	/* should be 0 */
 		"jsr	pc,(AL)\nZC", },
 
-{ UCALL,	INAREG,
+{ USTCALL,	INAREG,
 	SAREG,	TANY,
 	SANY,	TANY,
 		NAREG|NASL,	RESC1,	/* should be 0 */
@@ -231,10 +420,17 @@ struct optab table[] = {
 		"incb	AL\n", },
 
 { PLUS,		INBREG|FOREFF,
-	SBREG,			TLONG,
-	SBREG|SNAME|SOREG|SCON,	TLONG,
+	SBREG,			TLONG|TULONG,
+	SBREG|SNAME|SOREG|SCON,	TLONG|TULONG,
 		0,	RLEFT,
 		"add	AR,AL\nadd	UR,UL\nadc	AL\n", },
+
+/* Integer to pointer addition */
+{ PLUS,		INAREG,
+	SAREG,	TPOINT|TWORD,
+	SAREG,	TINT|TUNSIGNED,
+		0,	RLEFT,
+		"add	AR,AL\n", },
 
 /* Add to reg left and reclaim reg */
 { PLUS,		INAREG|FOREFF|FORCC,
@@ -255,6 +451,19 @@ struct optab table[] = {
 	SAREG|SNAME|SOREG|SCON,	TCHAR|TUCHAR,
 		0,	RLEFT|RESCC,
 		"add	AR,AL\n", },
+
+/* floating point */
+{ PLUS,		INCREG|FOREFF|FORCC,
+	SCREG,	TFLOAT,
+	SCREG,	TFLOAT,
+		0,	RLEFT|RESCC,
+		"addf	AR,AL\n", },
+
+{ PLUS,		INCREG|FOREFF|FORCC,
+	SCREG,			TDOUBLE,
+	SCREG|SNAME|SOREG,	TDOUBLE,
+		0,	RLEFT|RESCC,
+		"addf	AR,AL\n", },
 
 /* Post-increment read, byte */
 { MINUS,	INAREG,
@@ -310,12 +519,25 @@ struct optab table[] = {
 		0,	RLEFT|RESCC,
 		"subb	AR,AL\n", },
 
+/* floating point */
+{ MINUS,	INCREG|FOREFF|FORCC,
+	SCREG,	TFLOAT,
+	SCREG,	TFLOAT,
+		0,	RLEFT|RESCC,
+		"subf	AR,AL\n", },
+
+{ MINUS,	INCREG|FOREFF|FORCC,
+	SCREG,			TDOUBLE,
+	SCREG|SNAME|SOREG,	TDOUBLE,
+		0,	RLEFT|RESCC,
+		"subf	AR,AL\n", },
+
 /*
  * The next rules handle all shift operators.
  */
 { LS,	INBREG|FOREFF,
 	SBREG,	TLONG|TULONG,
-	SANY,	TANY,
+	SAREG,	TINT|TUNSIGNED,
 		0,	RLEFT,
 		"ashc	AR,AL\n", },
 
@@ -326,8 +548,20 @@ struct optab table[] = {
 		"asl	AL\n", },
 
 { LS,	INAREG|FOREFF,
-	SAREG,	TWORD,
+	SAREG,	TINT|TCHAR|TUNSIGNED|TUCHAR,
 	ANYSH,	TWORD,
+		0,	RLEFT,
+		"ash	AR,AL\n", },
+
+{ RS,	INAREG|FOREFF,
+	SAREG,	TUNSIGNED|TUCHAR,
+	SAREG|SCON,	TWORD,
+		NSPECIAL,	RLEFT,
+		"clr	r0\nashc	AR,r0\n", },
+
+{ RS,	INAREG|FOREFF,
+	SAREG,	TINT|TCHAR,
+	SAREG|SCON,	TWORD,
 		0,	RLEFT,
 		"ash	AR,AL\n", },
 
@@ -443,6 +677,7 @@ struct optab table[] = {
 		0,	RDEST|RESCC,
 		"movb	AR,AL\n", },
 
+/* Floating point */
 { ASSIGN,	FOREFF|INCREG,
 	SCREG,		TDOUBLE,
 	SNAME|SOREG|SCON,	TDOUBLE,
@@ -467,6 +702,13 @@ struct optab table[] = {
 		0,	RDEST,
 		"movfo	AR,AL\n", },
 
+/* Struct assigns */
+{ STASG,	FOREFF|INAREG,
+	SOREG|SNAME,	TANY,
+	SAREG,		TPTRTO|TANY,
+		NSPECIAL,	RDEST,
+		"Fpush	r0\nZIFpop	r0\n", },
+
 /*
  * DIV/MOD/MUL 
  */
@@ -481,22 +723,31 @@ struct optab table[] = {
 	SBREG|SNAME|SCON|SOREG,		TLONG|TULONG,
 	SBREG|SNAME|SCON|SOREG,		TLONG|TULONG,
 		NSPECIAL|NBREG|NBSL|NBSR,		RESC1,
+#if 0
 		"mov	UR,-(sp)\nmov	AR,-(sp)\n"
 		"mov	UL,-(sp)\nmov	AL,-(sp)\n"
-		"jsr	pc,lmul\nadd	$10,sp\n", },
+		"jsr	pc,lmul\nadd	$10,sp\n",
+#endif
+		"ZK", },
 
 { MUL,	INCREG,
-	SCREG,				TFLOAT|TDOUBLE,
-	SCREG|SNAME|SOREG,		TFLOAT|TDOUBLE,
+	SCREG,		TFLOAT,
+	SCREG,		TFLOAT,
+		0,	RLEFT,
+		"mulf	AR,AL\n", },
+
+{ MUL,	INCREG,
+	SCREG,			TDOUBLE,
+	SCREG|SNAME|SOREG,	TDOUBLE,
 		0,	RLEFT,
 		"mulf	AR,AL\n", },
 
 /* need extra move to be sure N flag is correct for sxt */
 { DIV,	INAREG,
-	ANYSH,		TINT|TPOINT,
-	ANYSH,		TINT|TPOINT,
+	SAREG,				TINT|TPOINT,
+	SAREG|SNAME|SCON|SOREG,		TINT|TPOINT,
 		NSPECIAL,	RDEST,
-		"mov	AL,r1\nsxt	r0\ndiv	AR,r0\n", },
+		"tst	r1\nsxt	r0\ndiv	AR,r0\n", },
 
 /* udiv uses args in registers */
 { DIV,	INAREG,
@@ -509,13 +760,22 @@ struct optab table[] = {
 	SBREG|SNAME|SCON|SOREG,		TLONG|TULONG,
 	SBREG|SNAME|SCON|SOREG,		TLONG|TULONG,
 		NSPECIAL|NBREG|NBSL|NBSR,		RESC1,
+#if 0
 		"mov	UR,-(sp)\nmov	AR,-(sp)\n"
 		"mov	UL,-(sp)\nmov	AL,-(sp)\n"
-		"jsr	pc,ldiv\nadd	$10,sp\n", },
+		"jsr	pc,ldiv\nadd	$10,sp\n",
+#endif
+		"ZK", },
 
 { DIV,	INCREG,
-	SCREG,			TFLOAT|TDOUBLE,
-	SCREG|SNAME|SOREG,	TFLOAT|TDOUBLE,
+	SCREG,	TFLOAT,
+	SCREG,	TFLOAT,
+		0,	RLEFT,
+		"divf	AR,AL\n", },
+
+{ DIV,	INCREG,
+	SCREG,			TDOUBLE,
+	SCREG|SNAME|SOREG,	TDOUBLE,
 		0,	RLEFT,
 		"divf	AR,AL\n", },
 
@@ -536,6 +796,13 @@ struct optab table[] = {
 		"mov	UL,-(sp)\nmov	AL,-(sp)\n"
 		"jsr	pc,ulrem\nadd	$10,sp\n", },
 
+/* need extra move to be sure N flag is correct for sxt */
+{ MOD,	INAREG,
+	SAREG,		TINT|TPOINT,
+	SAREG,		TINT|TPOINT,
+		NSPECIAL,	RDEST,
+		"mov	AL,r1\nsxt	r0\ndiv	AR,r0\n", },
+
 /* urem uses args in registers */
 { MOD,	INAREG,
 	SAREG,		TUNSIGNED,
@@ -550,19 +817,31 @@ struct optab table[] = {
 	SANY,	TPOINT|TWORD,
 	SOREG,	TLONG|TULONG,
 		NBREG,	RESC1, /* |NBSL - may overwrite index reg */
-		"mov	AR,A1\nmov	UR,U1\n", },
+		"mov	AL,A1\nmov	UL,U1\n", },
 
 { UMUL,	INAREG,
 	SANY,	TPOINT|TWORD,
 	SOREG,	TPOINT|TWORD,
 		NAREG|NASL,	RESC1,
-		"mov	AR,A1\n", },
+		"mov	AL,A1\n", },
 
 { UMUL,	INAREG,
 	SANY,	TANY,
 	SOREG,	TCHAR|TUCHAR,
 		NAREG|NASL,	RESC1,
-		"movb	AR,A1\n", },
+		"movb	AL,A1\n", },
+
+{ UMUL,	INCREG,
+	SANY,	TANY,
+	SOREG,	TDOUBLE,
+		NCREG,	RESC1,
+		"movf	AL,A1\n", },
+
+{ UMUL,	INCREG,
+	SANY,	TANY,
+	SOREG,	TFLOAT,
+		NCREG,	RESC1,
+		"movof	AL,A1\n", },
 
 /*
  * Logical/branching operators
@@ -586,30 +865,28 @@ struct optab table[] = {
 		"cmp	AL,AR\n", },
 
 { OPLOG,	FORCC,
-	SAREG|SOREG|SNAME|SCON,	TCHAR|TUCHAR,
-	SAREG|SOREG|SNAME|SCON,	TCHAR|TUCHAR,
+	SCREG|SCON,	TFLOAT,
+	SCREG,		TFLOAT,
 		0, 	RESCC,
-		"cmpb	AL,AR\n", },
+		"cmpf	AL,AR\ncfcc\n", },
 
 { OPLOG,	FORCC,
-	SBREG|SOREG|SNAME|SCON,	TLONG|TULONG,
-	SZERO,	TANY,
-		0,	RNULL,
-		"ZD", },
+	SCREG|SOREG|SNAME|SCON,	TDOUBLE,
+	SCREG,			TDOUBLE,
+		0, 	RESCC,
+		"cmpf	AL,AR\ncfcc\n", },
+
+{ OPLOG,	FORCC,
+	SAREG|SCON,	TCHAR|TUCHAR,
+	SAREG|SCON,	TCHAR|TUCHAR,
+		0, 	RESCC,
+		"cmp	AL,AR\n", },
 
 { OPLOG,	FORCC,
 	SBREG|SOREG|SNAME,	TLONG|TULONG,
 	SBREG|SOREG|SNAME,	TLONG|TULONG,
 		0,	RNULL,
 		"ZF", },
-
-/* AND/OR/ER/NOT */
-/* Optimize if high order bits are zero */
-{ AND,	FOREFF|INBREG|FORCC,
-	SOREG|SNAME|SBREG,	TLONG|TULONG,
-	SANDSCON,		TLONG|TULONG,
-		0,	RLEFT|RESCC,
-		"clr	AL\nbic	UR,UL\n", },
 
 { AND,	INBREG|FORCC,
 	SBREG,			TLONG|TULONG,
@@ -666,11 +943,11 @@ struct optab table[] = {
 		"xor	AR,AL\n", },
 
 /* XOR with char (extended insn)  */
-{ ER,	INAREG|FORCC,
-	SAREG,	TCHAR|TUCHAR,
-	SAREG,	TCHAR|TUCHAR,
+{ ER,	INBREG|FORCC,
+	SBREG|SOREG|SNAME,	TLONG|TULONG,
+	SBREG,	TLONG|TULONG,
 		0,	RLEFT|RESCC,
-		"xor	AR,AL\n", },
+		"xor	AR,AL\nxor	UR,UL\n", },
 
 /*
  * Jumps.
@@ -680,6 +957,12 @@ struct optab table[] = {
 	SANY,	TANY,
 		0,	RNOP,
 		"jbr	LL\n", },
+
+{ GOTO, 	FOREFF,
+	SAREG,	TANY,
+	SANY,	TANY,
+		0,	RNOP,
+		"jmp	*AL\n", },
 
 /*
  * Convert LTYPE to reg.
@@ -743,6 +1026,12 @@ struct optab table[] = {
 		0,	RLEFT,
 		"neg	AL\nneg	UL\nsbc	AL\n", },
 
+{ UMINUS,	INCREG|FOREFF,
+	SCREG,	TFLOAT|TDOUBLE,
+	SANY,	TANY,
+		0,	RLEFT,
+		"negf	AL\n", },
+
 
 { COMPL,	INBREG,
 	SBREG,	TLONG|TULONG,
@@ -760,10 +1049,16 @@ struct optab table[] = {
  * Arguments to functions.
  */
 { FUNARG,	FOREFF,
-	SCON|SBREG|SNAME|SOREG,	TLONG|TULONG,
+	SBREG|SNAME|SOREG,	TLONG|TULONG,
 	SANY,	TLONG|TULONG,
 		0,	RNULL,
 		"mov	UL,ZA(sp)\nmov	AL,-(sp)\n", },
+
+{ FUNARG,	FOREFF,
+	SCON,	TLONG|TULONG,
+	SANY,	TLONG|TULONG,
+		0,	RNULL,
+		"ZD", },
 
 { FUNARG,	FOREFF,
 	SZERO,	TANY,
@@ -818,6 +1113,13 @@ struct optab table[] = {
 	SANY,		TANY,
 		0,	RNULL,
 		"movf	AL,ZA(sp)\n", },
+
+{ STARG,	FOREFF,
+	SAREG,	TPTRTO|TANY,
+	SANY,	TSTRUCT,
+		NSPECIAL,	0,
+		"ZJ", },
+
 
 # define DF(x) FORREW,SANY,TANY,SANY,TANY,REWRITE,x,""
 

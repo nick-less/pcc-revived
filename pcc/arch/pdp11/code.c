@@ -1,4 +1,4 @@
-/*	$Id: code.c,v 1.9 2017/01/17 13:12:13 ragge Exp $	*/
+/*	$Id: code.c,v 1.17 2019/04/25 17:39:23 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -44,11 +44,11 @@ setseg(int seg, char *name)
 {
 	switch (seg) {
 	case PROG: name = ".text"; break;
+	case STRNG:
+	case RDATA:
 	case DATA:
 	case LDATA: name = ".data"; break;
 	case UDATA: break;
-	case STRNG:
-	case RDATA: name = ".rodata"; break;
 	default:
 		cerror("setseg");
 	}
@@ -84,30 +84,47 @@ defloc(struct symtab *sp)
 		printf("	.globl %s\n", n);
 	if (sp->slevel == 0) {
 		printf("%s:\n", n);
+		printf("~~%s:\n", n+1);
 	} else {
 		printf(LABFMT ":\n", sp->soffset);
 	}
 }
 
 /*
- * code for the end of a function
- * deals with struct return here
+ * Code for the end of a function. Deals with struct return here.
+ * On pdp11 we use a static bounce-buffer for struct return, 
+ * which address is returned in r0.
  */
 void
 efcode(void)
 {
+	struct symtab *sp;
 	NODE *p, *q;
 
 	if (cftnsp->stype != STRTY+FTN && cftnsp->stype != UNIONTY+FTN)
 		return;
-	/* Create struct assignment */
-	q = block(OREG, NIL, NIL, PTR+STRTY, 0, cftnsp->sap);
-	q->n_rval = R5;
-	slval(q, 8); /* return buffer offset */
-	q = buildtree(UMUL, q, NIL);
+
+	/* Handcraft a static buffer */
+	sp = getsymtab("007", SSTMT);
+	sp->stype = DECREF(cftnsp->stype);
+	sp->sdf = cftnsp->sdf;
+	sp->sap = cftnsp->sap;
+	sp->sclass = STATIC;
+	sp->soffset = getlab();
+	sp->slevel = 1;
+	defzero(sp);
+
+	/* create struct assignment */
+	q = nametree(sp);
 	p = block(REG, NIL, NIL, PTR+STRTY, 0, cftnsp->sap);
 	p = buildtree(UMUL, p, NIL);
 	p = buildtree(ASSIGN, q, p);
+	ecomp(p);
+
+	/* return address of buffer */
+	q = buildtree(ADDROF, nametree(sp), NIL);
+	p = block(REG, NIL, NIL, PTR+STRTY, 0, cftnsp->sap);
+	p = buildtree(ASSIGN, p, q);
 	ecomp(p);
 }
 
@@ -121,12 +138,6 @@ bfcode(struct symtab **sp, int cnt)
 	struct symtab *sp2;
 	NODE *n;
 	int i;
-
-	if (cftnsp->stype == STRTY+FTN || cftnsp->stype == UNIONTY+FTN) {
-		/* Function returns struct, adjust arg offset */
-		for (i = 0; i < cnt; i++) 
-			sp[i]->soffset += SZPOINT(INT);
-	}
 
 	if (xtemps == 0)
 		return;
@@ -156,6 +167,10 @@ ejobcode(int flag)
 void
 bjobcode(void)
 {
+	extern char *asspace;
+	/* ".word" is not printed out for pdp11 as */
+	astypnames[INT] = astypnames[UNSIGNED] = "";
+	asspace = ".=.+"; /* advance counter, not .space */
 }
 
 /*
@@ -219,61 +234,6 @@ builtin_return_address(const struct bitable *bt, NODE *a)
 
 NODE *
 builtin_frame_address(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-
-NODE *
-builtin_huge_val(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_huge_valf(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_huge_vall(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_inf(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_inff(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_infl(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_nan(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_nanf(const struct bitable *bt, NODE *a)
-{
-	uerror(__func__);
-	return bcon(0);
-}
-NODE *
-builtin_nanl(const struct bitable *bt, NODE *a)
 {
 	uerror(__func__);
 	return bcon(0);
