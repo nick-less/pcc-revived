@@ -1,4 +1,4 @@
-/*	$Id: cpp.c,v 1.307 2019/05/18 08:11:00 ragge Exp $	*/
+/*	$Id: cpp.c,v 1.312 2019/12/15 09:04:03 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2010 Anders Magnusson (ragge@ludd.luth.se).
@@ -74,12 +74,13 @@ int tflag;	/* traditional cpp syntax */
 int dflag;	/* debug printouts */
 static void prline(const usch *s);
 static void prrep(mvtyp);
+static usch *addname(usch *str);
 #define	DPRINT(x) if (dflag) printf x
 #else
 #define DPRINT(x)
 #endif
 #define	PUTOB(ob, ch) (ob->cptr == ob->bsz ? \
-	putob(ob, ch) : (void)(ob->buf[ob->cptr++] = ch))
+	(putob(ob, ch), 1) : (ob->buf[ob->cptr++] = ch))
 
 static int istty;
 int Aflag, Cflag, Eflag, Mflag, dMflag, Pflag, MPflag, MMDflag;
@@ -87,7 +88,7 @@ char *Mfile, *MPfile;
 char *Mxfile;
 int warnings, Mxlen, skpows;
 static usch utbuf[CPPBUF];
-struct iobuf pb = { utbuf, 0, CPPBUF, 0, 1, BUTBUF };
+struct iobuf pb /* = { utbuf, 0, CPPBUF, 0, 1, BUTBUF } */ ;
 static void macstr(const usch *s);
 #if LIBVMF
 struct vspace ibspc, macspc;
@@ -146,32 +147,30 @@ int	elslvl;
  * expanded identifier.
  */
 
-/* args for lookup() */
-#define	FIND	0
-#define	ENTER	1
-
 /*
  * No-replacement array.  If a macro is found and exists in this array
  * then no replacement shall occur.
  */
-struct blocker {
-	struct blocker *next;
+struct blok {
+	int nidx;
 	struct symtab *sp;
 };
-struct blocker *blkidx[RECMAX];
+struct blok *blokx[L2MAX];
+#define	BLKPTR(x)	((x) & ((CPPBUF/sizeof(struct blok))-1))
+#define	BLKBUF(x)	((x) / (CPPBUF/sizeof(struct blok)))
 int blkidp;
 
 static struct iobuf *readargs(struct iobuf *, struct symtab *, const usch **);
-static struct iobuf *exparg(int, struct iobuf *, struct iobuf *, struct blocker *);
-static struct iobuf *subarg(struct symtab *sp, const usch **args, int, struct blocker *);
+static struct iobuf *exparg(int, struct iobuf *, struct iobuf *, int);
+static struct iobuf *subarg(struct symtab *sp, const usch **args, int, int);
 static void usage(void);
-static usch *xstrdup(const usch *str);
 static void addidir(char *idir, struct incs **ww);
 static void vsheap(struct iobuf *, const char *, va_list);
 static int skipws(struct iobuf *ib);
 static int getyp(usch *s);
 static void macsav(int ch);
 static void fstrstr(struct iobuf *ib, struct iobuf *ob);
+static usch *chkfile(const usch *n1, const usch *n2);
 
 int
 main(int argc, char **argv)
@@ -320,6 +319,24 @@ main(int argc, char **argv)
 	macptr[0] = xmalloc(CPPBUF);
 #endif
 
+	/* init output buffer */
+	pb.buf = utbuf;
+	pb.bsz = CPPBUF;
+	pb.inuse = 1;
+	pb.type = BUTBUF;
+
+#ifdef pdp11
+	/* set predefined symbols here (not from cc) */
+	bsheap(fb, "#define __BSD2_11__\n");
+	bsheap(fb, "#define BSD2_11\n");
+	bsheap(fb, "#define __pdp11__\n");
+	bsheap(fb, "#define pdp11\n");
+	bsheap(fb, "#define unix\n"); /* XXX go away */
+	addidir("/usr/include", &incdir[SYSINC]);
+	if (tflag == 0)
+		bsheap(fb, "#define __STDC__ 1\n");
+#endif
+
 	macsav(0);
 	filloc->valoff = linloc->valoff = pragloc->valoff =
 	    ctrloc->valoff = defloc->valoff = 1;
@@ -341,9 +358,9 @@ main(int argc, char **argv)
 			c = argv[0];
 		else
 			c++;
-		Mfile = (char *)xstrdup((usch *)c);
+		Mfile = (char *)addname((usch *)c);
 		if (MPflag)
-			MPfile = (char *)xstrdup((usch *)c);
+			MPfile = (char *)addname((usch *)c);
 		if (Mxfile)
 			Mfile = Mxfile;
 		if ((c = strrchr(Mfile, '.')) == NULL)
@@ -383,8 +400,7 @@ main(int argc, char **argv)
 	ifiles = NULL;
 	/* end initial defines */
 
-	if (pushfile(fn1, fn2, 0, NULL))
-		error("cannot open %s", argv[0]);
+	pushfile(fn1, fn2, 0, NULL);
 
 	if (Mflag == 0) {
 		if (skpows)
@@ -437,10 +453,24 @@ putob(struct iobuf *ob, int ch)
 	ob->buf[ob->cptr++] = ch;
 }
 
+static int niobs;
+static struct iobuf *iobs, *ioblnk;
+
 static struct iobuf *
 giob(int typ, const usch *bp, int bsz)
 {
-	struct iobuf *iob = xmalloc(sizeof(struct iobuf));
+	struct iobuf *iob;
+
+	if (ioblnk) {
+		iob = ioblnk;
+		ioblnk = (void *)iob->buf;
+	} else {
+		if (niobs == 0) {
+			iobs = xmalloc(CPPBUF);
+			niobs = CPPBUF/sizeof(*iob);
+		}
+		iob = &iobs[--niobs];
+	}
 
 	if (bp == NULL)
 		bp = xmalloc(bsz);
@@ -464,8 +494,8 @@ getobuf(int type)
 
 	switch (type) {
 	case BMAC:
-#if LIBVMF && 0
-		iob = giob(BINBUF, (usch *)vseg->s_cinfo, CPPBUF);
+#if LIBVMF
+		iob = giob(BMAC, (usch *)macvseg->s_cinfo, BYTESPERSEG);
 #else
 		iob = giob(BMAC, NULL, CPPBUF);
 #endif
@@ -477,7 +507,7 @@ getobuf(int type)
 		break;
 	case BINBUF:
 #if LIBVMF
-		iob = giob(BINBUF, (usch *)ifiles->vseg->s_cinfo, CPPBUF);
+		iob = giob(BINBUF, (usch *)ifiles->vseg->s_cinfo, BYTESPERSEG);
 #else
 		iob = giob(BINBUF, NULL, CPPBUF);
 #endif
@@ -616,7 +646,8 @@ bufree(struct iobuf *iob)
 		nbufused--;
 	if (iob->ro == 0)
 		free(iob->buf);
-	free(iob);
+	iob->buf = (void *)ioblnk;
+	ioblnk = iob;
 }
 
 static void
@@ -664,7 +695,7 @@ line(void)
 	oidx = ifiles->idx;
 	ob = savln();
 	ob->cptr = 0;
-	exparg(1, ob, ib = getobuf(BNORMAL), NULL);
+	exparg(1, ob, ib = getobuf(BNORMAL), 0);
 	inp = ib->buf;
 
 	while (ISWSNL(*inp))
@@ -675,7 +706,7 @@ line(void)
 		n = n * 10 + *inp++ - '0';
 
 	/* Can only be decimal number here between 1-2147483647 */
-	if (n < 1 || n > 2147483647)
+	if (n < 1 || n > 2147483647L)
 		goto bad;
 
 	while (ISWSNL(*inp))
@@ -700,7 +731,7 @@ line(void)
 	ob->buf[--ob->cptr] = 0; /* remove trailing \" */
 
 	if (strcmp((char *)ifiles->fname, (char *)ob->buf+1))
-		ifiles->fname = xstrdup(ob->buf+1);
+		ifiles->fname = addname(ob->buf+1);
 
 	while (ISWSNL(*inp))
 		inp++;
@@ -749,8 +780,8 @@ fsrch_macos_framework(const usch *fn, const usch *dir)
 	if (s == NULL)
 		return 0;
 
-	nm = xstrdup(dir);
-	p = xstrdup(fn);
+	nm = addname(dir);
+	p = addname(fn);
 	*(p + len) = 0;
 
 	q = (usch *)strstr((const char *)nm, (const char *)p);
@@ -769,7 +800,7 @@ fsrch_macos_framework(const usch *fn, const usch *dir)
 	
 	ob = bsheap(NULL, "%s/Frameworks/%s.framework/Headers%s", nm, fn, s);
 	free(nm);
-	nm = xstrdup(ob->buf);
+	nm = addname(ob->buf);
 	bufree(ob);
 	if (pushfile(nm, fn, SYSINC, NULL) == 0)
 		return 1;
@@ -786,18 +817,17 @@ fsrch_macos_framework(const usch *fn, const usch *dir)
 static int
 fsrch(const usch *fn, int idx, struct incs *w)
 {
+	usch *res;
 	int i;
 
 	for (i = idx; i < 2; i++) {
 		if (i > idx)
 			w = incdir[i];
 		for (; w; w = w->next) {
-			size_t len = strlen((char *)w->dir) + strlen((char *)fn) + 2; /* '/' + \0 */
-			char *f = xmalloc(len);
-			snprintf(f, len, "%s/%s", w->dir, fn);
-			if (pushfile((usch *)f, fn, i, w->next) == 0)
+			if ((res = chkfile(fn, w->dir)) != NULL) {
+				pushfile(res, fn, i, w->next);
 				return 1;
-			free(f);
+			}
 		}
 	}
 
@@ -810,7 +840,7 @@ fsrch(const usch *fn, int idx, struct incs *w)
 		/*
 		 * Dig out org filename path and try to find.
 		 */
-		usch *p, *dir = xstrdup(ifiles->orgfn);
+		usch *p, *dir = addname(ifiles->orgfn);
 		if ((p = (usch *)strrchr((char *)dir, '/')) != NULL) {
 			p[1] = 0;
 			if (fsrch_macos_framework(fn, dir) == 1)
@@ -875,6 +905,26 @@ incfn(void)
 }
 
 /*
+ * concatenate n1 with n2 and see if the result is an accessible file.
+ * return a permanent version of the resulting name or NULL if nonexisting.
+ */
+static usch *
+chkfile(const usch *n1, const usch *n2)
+{
+	struct iobuf *ob;
+	usch *res = NULL;
+
+	if (n2 != NULL) {
+		ob = bsheap(NULL, "%s/%s", n2, n1);
+	} else
+		ob = strtobuf(n1, NULL);
+	if (access((char *)ob->buf, R_OK) == 0)
+		res = addname(ob->buf);
+	bufree(ob);
+	return res;
+}
+
+/*
  * Include a file. Include order:
  * - For <...> files, first search -I directories, then system directories.
  * - For "..." files, first search "current" dir, then as <...> files.
@@ -891,43 +941,38 @@ include(void)
 	if ((ob = incfn()) == NULL) /* get include file name in obuf */
 		error("bad #include");
 
-	fn = xstrdup(ob->buf) + 1;	/* Save on string heap? */
-	bufree(ob);
-	/* test absolute path first */
-	if (fn[0] == '/' && pushfile(fn, fn, 0, NULL) == 0)
-		goto okret;
-	if (fn[-1] == '\"') {
-		/* nope, failed, try to create a path for it */
-		if ((nm = (usch *)strrchr((char *)ifiles->orgfn, '/'))) {
-			ob = strtobuf((usch *)ifiles->orgfn, NULL);
-			ob->cptr = (int)(nm - ifiles->orgfn) + 1;
-			strtobuf(fn, ob);
-			nm = xstrdup(ob->buf);
-			bufree(ob);
-		} else
-			nm = xstrdup(fn);
-		if (pushfile(nm, nm, 0, NULL) == 0) {
-			free(fn-1);
+	if (ob->buf[1] == '/') {
+		 if ((fn = chkfile(&ob->buf[1], 0)) != NULL)
 			goto okret;
-		}
 	}
+	if (ob->buf[0] == '\"') {
+		if ((nm = (usch *)strrchr((char *)ifiles->orgfn, '/'))) {
+			*nm = 0;
+		 	fn = chkfile(&ob->buf[1], ifiles->orgfn);
+			*nm = '/';
+		} else 
+			fn = chkfile(&ob->buf[1], 0);
+		if (fn != NULL)
+			goto okret;
+	}
+	fn = addname(&ob->buf[1]);
+	bufree(ob);
 	if (fsrch(fn, 0, incdir[0]))
-		goto okret;
+		goto prt;
 
 	error("cannot find '%s'", fn);
 	/* error() do not return */
 
-okret:
-	if (nm)
-		free(nm);
-	prtline(1);
+okret:	bufree(ob);
+	pushfile(fn, fn, 0, NULL);
+prt:	prtline(1);
 }
 
 void
 include_next(void)
 {
 	struct iobuf *ob;
-	usch *nm;
+	usch *fn;
 
 	if (flslvl)
 		return;
@@ -935,11 +980,11 @@ include_next(void)
 	if ((ob = incfn()) == NULL) /* get include file name in obuf */
 		error("bad #include_next");
 
-	nm = xstrdup(ob->buf+1);
+	fn = addname(&ob->buf[1]);
 	bufree(ob);
+	if (fsrch(fn, ifiles->idx, ifiles->incs) == 0)
+		error("cannot find '%s'", &ob->buf[1]);
 
-	if (fsrch(nm, ifiles->idx, ifiles->incs) == 0)
-		error("cannot find '%s'", nm);
 	prtline(1);
 }
 
@@ -1054,7 +1099,7 @@ define(void)
 	if (np->valoff) {
 		redef = 1;
 	} else {
-		np->namep = xstrdup(dp);
+		np->namep = addname(dp);
 		redef = 0;
 	}
 
@@ -1113,7 +1158,10 @@ define(void)
 	} else if (!ISWS(c))
 		goto bad;
 
-	Cflag = oCflag; /* Enable comments again */
+	if (tflag == 0)
+		Cflag = oCflag; /* Enable comments again */
+	else
+		Cflag = 1; /* need comments if -t */
 
 	begpos = macpos;
 	if (ISWS(c))
@@ -1176,20 +1224,29 @@ define(void)
 			break;
 
 		case CMNT:
-			macsav(c), c = cinput();
+			if (oCflag)
+				macsav(c);
+			c = cinput();
 			if (c == '/') {
 				do {
-					macsav(c), c = cinput();
+					if (oCflag)
+						macsav(c);
+					c = cinput();
 				} while (c && c != '\n');
 				if (c == 0)
 					goto bad;
 				continue;
 			} else {
-				macsav(c);
+				if (oCflag)
+					macsav(c);
 				for (;;) {
-					macsav(c = cinput());
+					c = cinput();
+					if (oCflag)
+						macsav(c);
 back:					if (c == '*') {
-						macsav(c = cinput());
+						c = cinput();
+						if (oCflag)
+							macsav(c);
 						if (c == '/')
 							break;
 						if (c == '*')
@@ -1279,6 +1336,8 @@ back:					if (c == '*') {
 	cunput(c);
 	/* remove trailing whitespace */
 	delews(begpos);
+
+	Cflag = oCflag; /* Enable comments again */
 
 	macsav(0);
 	if (vararg)
@@ -1386,8 +1445,10 @@ pragoper(struct iobuf *ib)
 		goto err;
 	putstr((usch *)"\n#pragma ");
 	while ((t = pragwin(ib)) != '\"') {
-		if (t == BLKID) {
+		if (t == BLKID || t == BLKID2) {
 			pragwin(ib);
+			if (t == BLKID2)
+				pragwin(ib);
 			continue;
 		}
 		if (t == '\"')
@@ -1407,11 +1468,12 @@ err:	error("_Pragma() syntax error");
 
 #ifdef PCC_DEBUG
 static void
-prblocker(char *s, struct blocker *bl)
+prblocker(char *s, int id)
 {
 	printf("%s (blocker): ", s);
-	for (; bl; bl = bl->next)
-		printf("%s ", bl->sp->namep);
+	
+	for (; id; id = blokx[BLKBUF(id)][BLKPTR(id)].nidx)
+		printf("%s ", blokx[BLKBUF(id)][BLKPTR(id)].sp->namep);
 	printf("\n");
 		
 }
@@ -1423,105 +1485,78 @@ prblocker(char *s, struct blocker *bl)
  * Check if symtab is in blocklist based on index l.
  */
 static int
-expok(struct symtab *sp, int l)
+expok(struct symtab *sp, int id)
 {
-	struct blocker *w;
 
-	if (l == 0)
+	if (id == 0)
 		return 1;
 #ifdef PCC_DEBUG
 	if (dflag)
-		prblocker("expok", blkidx[l]);
+		prblocker("expok", id);
 #endif
-	w = blkidx[l];
-	while (w) {
-		if (w->sp == sp)
+	for (; id; id = blokx[BLKBUF(id)][BLKPTR(id)].nidx) {
+		if (blokx[BLKBUF(id)][BLKPTR(id)].sp == sp)
 			return 0;
-		w = w->next;
 	}
 	return 1;
 }
 
-/*
- * Check if symtab is in blocklist.
- */
-static int
-expokb(struct symtab *sp, struct blocker *bl)
-{
-	struct blocker *w;
-
-	if (bl == 0)
-		return 1;
-#ifdef PCC_DEBUG
-	if (dflag)
-		prblocker("expok", bl);
-#endif
-	w = bl;
-	while (w) {
-		if (w->sp == sp)
-			return 0;
-		w = w->next;
-	}
-	return 1;
-}
-
-static struct blocker *
-blkget(struct symtab *sp, struct blocker *obl)
-{
-	struct blocker *bl = calloc(sizeof(*obl), 1);
-
-	bl->sp = sp;
-	bl->next = obl;
-	return bl;
-}
+#define	expokb(s,l)	expok(s,l)
 
 static int
-blkix(struct blocker *obl)
+blkget(struct symtab *sp, int id)
 {
-	if (blkidp > 1 && blkidx[blkidp-1] == obl)
-		return blkidp-1;
-	if (blkidp == RECMAX)
-		error("blkix");
-	blkidx[blkidp] = obl;
+	int upper = BLKBUF(blkidp);
+	int off = BLKPTR(blkidp);
+
+	if (upper == L2MAX)
+		error("too complex macro");
+	if (blokx[upper] == NULL)
+		blokx[upper] = xmalloc(CPPBUF);
+	blokx[upper][off].sp = sp;
+	blokx[upper][off].nidx = id;
 	return blkidp++;
 }
 
-static struct blocker *
-mergeadd(struct blocker *bl, int m)
+static int
+mergeadd(int l, int m)
 {
-	struct blocker *w, *ww;
 
-	DPRINT(("mergeadd: %p %d\n", bl, m));
+	DPRINT(("mergeadd: %d %d\n", l, m));
+#ifdef PCC_DEBUG
 	if (dflag > 1) {
-		prblocker("mergeadd", bl);
-		if (m) prblocker("mergeadd", blkidx[m]);
+		prblocker("mergeadd", l);
+		if (m) prblocker("mergeadd", m);
 	}
-	if (bl == 0)
-		return blkidx[m];
-	if (m == 0)
-		return bl;
+#endif
+	if (l == 0)
+		return m;
+	if (m == 0 || l == m)
+		return l;
 
-	blkidx[blkidp] = bl;
-	for (w = blkidx[m]; w; w = w->next) {
-		ww = calloc(sizeof(*w), 1);
-		ww->sp = w->sp;
-		ww->next = blkidx[blkidp];
-		blkidx[blkidp] = ww;
-	}
-	DPRINT(("mergeadd return: %d ", blkidp));
+	for (; m; m = blokx[BLKBUF(m)][BLKPTR(m)].nidx)
+		l = blkget(blokx[BLKBUF(m)][BLKPTR(m)].sp, l);
+
+	DPRINT(("mergeadd return: %d ", l));
 #ifdef PCC_DEBUG
 	if (dflag)
-		prblocker("mergeadd", blkidx[blkidp]);
+		prblocker("mergeadd", l);
 #endif
-	return blkidx[blkidp++];
+	return l;
 }
 
 static void
 storeblk(int l, struct iobuf *ob)
 {
 	DPRINT(("storeblk: %d\n", l));
-	putob(ob, BLKID);
-	putob(ob, l);
+	if (l == 0)
+		return;
+	if (l > 255) {
+		putob(ob, BLKID2);
+		putob(ob, l >> 8);
+	} else
+		putob(ob, BLKID);
+	putob(ob, l & 255);
 }
 
 /*
@@ -1665,20 +1700,25 @@ loopover(struct iobuf *ib, struct iobuf *ob)
 			fstrstr(ib, xb);
 			xb->buf[xb->cptr] = 0;
 			for (cp = xb->buf; *cp; cp++) {
-				if (*cp <= BLKID) {
+				if (*cp <= BLKID2) {
 					if (*cp == BLKID)
 						cp++;
+					if (*cp == BLKID2)
+						cp++, cp++;
 					continue;
 				}
 				putob(ob, *cp);
 			}
 			continue;
 		case BLKID:
-			l = ib->buf[ib->cptr+1];
-			ib->cptr+=2;
+		case BLKID2:
+			l = ib->buf[++ib->cptr];
+			if (t == BLKID2)
+				l = (l << 8) | ib->buf[++ib->cptr];
+			ib->cptr++;
 			/* FALLTHROUGH */
 		case IDENT:
-			if (t != BLKID)
+			if (t == IDENT)
 				l = 0;
 			/*
 			 * Tricky: if this is the last identifier
@@ -1711,7 +1751,7 @@ sstr:				for (; cn < ib->cptr; cn++)
 					}
 					ib->cptr = cn;
 				}
-newmac:				if ((xob = submac(sp, 1, ib, NULL)) == NULL) {
+newmac:				if ((xob = submac(sp, 1, ib, 0)) == NULL) {
 					strtobuf((usch *)sp->namep, ob);
 				} else {
 					sp = loopover(xob, ob);
@@ -1744,10 +1784,10 @@ struct iobuf *
 kfind(struct symtab *sp)
 {
 	extern int inexpr;
-	struct blocker *bl;
 	struct iobuf *ib, *ob, *outb, *ab;
 	const usch *argary[MAXARGS+1];
 	int c, n = 0;
+	int l;
 
 	blkidp = 1;
 	outb = NULL;
@@ -1766,10 +1806,10 @@ kfind(struct symtab *sp)
 
 	case DEFLOC:
 	case OBJCT:
-		bl = blkget(sp, NULL);
+		l = blkget(sp, 0);
 		ib = macrepbuf(sp->valoff);
 		ob = getobuf(BNORMAL);
-		ob = exparg(1, ib, ob, bl);
+		ob = exparg(1, ib, ob, l);
 		bufree(ib);
 		break;
 
@@ -1796,11 +1836,11 @@ kfind(struct symtab *sp)
 again:		if ((ab = readargs(NULL, sp, argary)) == 0)
 			error("readargs");
 
-		bl = blkget(sp, NULL);
-		ib = subarg(sp, argary, 1, bl);
+		l = blkget(sp, 0);
+		ib = subarg(sp, argary, 1, l);
 		bufree(ab);
 		ob = getobuf(BNORMAL);
-		ob = exparg(1, ib, ob, bl);
+		ob = exparg(1, ib, ob, l);
 		bufree(ib);
 		break;
 	}
@@ -1842,9 +1882,9 @@ again:		if ((ab = readargs(NULL, sp, argary)) == 0)
  * The same as kfind but read a string.
  */
 struct iobuf *
-submac(struct symtab *sp, int lvl, struct iobuf *ib, struct blocker *obl)
+submac(struct symtab *sp, int lvl, struct iobuf *ib, int l)
 {
-	struct blocker *bl;
+	int bl;
 	struct iobuf *ob, *ab;
 	const usch *argary[MAXARGS+1];
 	int cn;
@@ -1862,7 +1902,7 @@ submac(struct symtab *sp, int lvl, struct iobuf *ib, struct blocker *obl)
 		ob = getobuf(BNORMAL);
 		break;
 	case OBJCT:
-		bl = blkget(sp, obl);
+		bl = blkget(sp, l);
 		ib = macrepbuf(sp->valoff);
 		ob = getobuf(BNORMAL);
 		DPRINT(("%d:submac: calling exparg\n", lvl));
@@ -1887,7 +1927,7 @@ submac(struct symtab *sp, int lvl, struct iobuf *ib, struct blocker *obl)
 			ib->cptr = cn; /* XXX */
 			return 0;
 		}
-		bl = blkget(sp, obl);
+		bl = blkget(sp, l);
 		ib = subarg(sp, argary, lvl+1, bl);
 		bufree(ab);
 
@@ -1965,9 +2005,12 @@ readargs(struct iobuf *in, struct symtab *sp, const usch **args)
 				} else
 					error("eof in macro");
 				break;
+			case BLKID2:
 			case BLKID:
 				putob(ab, c);
 				putob(ab, ifiles->ib->buf[ifiles->ib->cptr++]);
+				if (c == BLKID2)
+					putob(ab, ifiles->ib->buf[ifiles->ib->cptr++]);
 				break;
 			case '/':
 				if ((c = cinput()) == '*' || c == '/')
@@ -2097,9 +2140,9 @@ escstr(const usch *bp, struct iobuf *ob)
  * result is pushed-back for more scanning.
  */
 struct iobuf *
-subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
+subarg(struct symtab *nl, const usch **args, int lvl, int l)
 {
-	struct blocker *w;
+	int lw;
 	struct iobuf *ob, *cb, *nb, *vb;
 	int narg, snuff, c2;
 	const usch *sp, *bp, *ap, *vp;
@@ -2117,7 +2160,7 @@ subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
 		printf("%d:subarg ARGlist for %s: '", lvl, nl->namep);
 		prrep(nl->valoff);
 		printf("'\n");
-		prblocker("subarg", bl);
+		prblocker("subarg", l);
 	}
 #endif
 
@@ -2162,7 +2205,7 @@ subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
 				 *  after all macros contained therein have
 				 *  been expanded.".
 				 */
-				w = bl ? bl->next : NULL;
+				lw = l ? blokx[BLKBUF(l)][BLKPTR(l)].nidx : 0;
 				nb = mkrobuf(bp);
 				DPRINT(("%d:subarg: calling exparg\n", lvl));
 				do {
@@ -2170,7 +2213,7 @@ subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
 					cb->cptr = 0;
 					didexpand = 0;
 					nb = getobuf(BNORMAL);
-					nb = exparg(lvl+1, cb, nb, w);
+					nb = exparg(lvl+1, cb, nb, lw);
 					bufree(cb);
 				} while (didexpand);
 				DPRINT(("%d:subarg: return exparg\n", lvl));
@@ -2184,7 +2227,7 @@ subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
 			}
 		} else if (ISID0(*sp)) {
 			if (lookup(sp, FIND))
-				storeblk(blkix(bl), ob);
+				storeblk(l, ob);
 			while (ISID(*sp))
 				putob(ob, *sp++);
 			sp--;
@@ -2206,7 +2249,7 @@ subarg(struct symtab *nl, const usch **args, int lvl, struct blocker *bl)
  * concatenated, in which case the blocking is removed.
  */
 struct iobuf *
-exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
+exparg(int lvl, struct iobuf *ib, struct iobuf *ob, int l)
 {
 	extern int inexpr;
 	struct iobuf *nob, *tb;
@@ -2220,7 +2263,7 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 		printf("exparg entry: full ");
 		prline(ib->buf+ib->cptr);
 		printf("\n");
-		prblocker("exparg", bl);
+		prblocker("exparg", l);
 	}
 #endif
 
@@ -2236,19 +2279,24 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 		case STRING:
 			fstrstr(ib, ob);
 			break;
+		case BLKID2:
 		case BLKID:
 			m = ib->buf[++ib->cptr];
+			if (c == BLKID2)
+				m = (m << 8) | ib->buf[++ib->cptr];
 			ib->cptr++;
 			/* FALLTHROUGH */
 		case IDENT:
-			if (c != BLKID)
+			if (c == IDENT)
 				m = 0;
 			tb = getobuf(BNORMAL);
 			cp = ib->buf+ib->cptr;
-			for (; ISID(*cp) || *cp == BLKID; cp++) {
-				if (*cp == BLKID) {
+			for (; ISID(*cp) || *cp == BLKID || *cp == BLKID2; cp++) {
+				if (*cp == BLKID || *cp == BLKID2) {
 					/* XXX add to block list */
 					cp++;
+					if (cp[-1] == BLKID2)
+						cp++;
 				} else
 					putob(tb, *cp);
 			}
@@ -2276,8 +2324,8 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 					error("bad defined");
 				cp++;
 				ib->cptr = (int)(cp - ib->buf);
-			} else if (expokb(nl, bl) && expok(nl, m) &&
-			    (nob = submac(nl, lvl+1, ib, bl))) {
+			} else if (expokb(nl, l) && expok(nl, m) &&
+			    (nob = submac(nl, lvl+1, ib, l))) {
 				didexpand = 1;
 				if (nob->buf[0] == '-' || nob->buf[0] == '+')
 					putob(ob, ' ');
@@ -2288,7 +2336,7 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 					putob(ob, ' ');
 				bufree(nob);
 			} else {
-				storeblk(blkix(mergeadd(bl, m)), ob);
+				storeblk(mergeadd(l, m), ob);
 				buftobuf(tb, ob);
 			}
 			bufree(tb);
@@ -2308,7 +2356,7 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 		printf("%d:exparg: full ", lvl);
 		prline(ob->buf);
 		printf("\n");
-		prblocker("exparg", bl);
+		prblocker("exparg", l);
 	}
 #endif
 	return ob;
@@ -2317,13 +2365,11 @@ exparg(int lvl, struct iobuf *ib, struct iobuf *ob, struct blocker *bl)
 #ifdef PCC_DEBUG
 
 static void
-blkprint(int idx)
+blkprint(int l)
 {
-	struct blocker *bl = blkidx[idx];
-
-	printf("<BLKID(");
-	for (; bl; bl = bl->next)
-		printf("%s ", bl->sp->namep);
+	printf("<BLKID%s(", l > 255 ? "2" : "");
+	for (; l; l = blokx[BLKBUF(l)][BLKPTR(l)].nidx)
+		printf("%s ", blokx[BLKBUF(l)][BLKPTR(l)].sp->namep);
 	printf(")>");
 }
 
@@ -2343,6 +2389,7 @@ prrep(mvtyp ptr)
 		case CONC: printf("<CONC>"); break;
 		case SNUFF: printf("<SNUFF>"); break;
 		case BLKID: blkprint(macget(ptr++)); break;
+		case BLKID2: blkprint(macget(ptr) << 8 | macget(ptr+1)); ptr += 2; break;
 		default: printf("%c", s); break;
 		}
 	}
@@ -2354,6 +2401,7 @@ prline(const usch *s)
 	while (*s) {
 		switch (*s) {
 		case BLKID: blkprint(*++s); break;
+		case BLKID2: blkprint(s[1] << 8 | s[2]); s += 2; break;
 		case WARN: printf("<WARN>"); break;
 		case CONC: printf("<CONC>"); break;
 		case SNUFF: printf("<SNUFF>"); break;
@@ -2507,8 +2555,13 @@ struct tree {
 };
 
 #define BITNO(x)		((x) & ~(LEFT_IS_LEAF|RIGHT_IS_LEAF))
+#ifdef pdp11
+#define LEFT_IS_LEAF		0x8000
+#define RIGHT_IS_LEAF		0x4000
+#else
 #define LEFT_IS_LEAF		0x80000000
 #define RIGHT_IS_LEAF		0x40000000
+#endif
 #define IS_LEFT_LEAF(x)		(((x) & LEFT_IS_LEAF) != 0)
 #define IS_RIGHT_LEAF(x)	(((x) & RIGHT_IS_LEAF) != 0)
 #define P_BIT(key, bit)		(key[bit >> 3] >> (bit & 7)) & 1
@@ -2678,14 +2731,23 @@ xrealloc(void *p, int sz)
 	return rv;
 }
 
+/*
+ *
+ */
 static usch *
-xstrdup(const usch *str)
+addname(usch *str)
 {
-	usch *rv;
+	static usch *nbase;
+	static int nsz;
+	int len = strlen((char *)str) + 1;
 
-	if ((rv = (usch *)strdup((const char *)str)) == NULL)
-		error("xstrdup: out of mem");
-	return rv;
+	if (nsz < len) {
+		nbase = xmalloc(CPPBUF);
+		nsz = CPPBUF;
+	}
+	memcpy(nbase, str, len);
+	str = nbase;
+	nsz -= len;
+	nbase += len;
+	return str;
 }
-
-

@@ -1,4 +1,4 @@
-/*	$Id: cpp.h,v 1.111 2016/12/04 12:55:05 ragge Exp $	*/
+/*	$Id: cpp.h,v 1.113 2019/12/14 15:03:16 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2010 Anders Magnusson (ragge@ludd.luth.se).
@@ -82,9 +82,10 @@ typedef	unsigned int mvtyp;
 #define CONC	2	/* STX, not legal char */
 #define SNUFF	3	/* ETX, not legal char */
 #define	BLKID	4	/* EOT, not legal char */
+#define	BLKID2	5	/* ENQ, not legal char */
 
 /* Used in macro expansion */
-#define RECMAX	10000			/* max # of recursive macros */
+#define	L2MAX	32			/* max index into blocker pages */
 #define	MKB(l,h)	(l+((h)<<8))
 
 /* quick checks for some characters */
@@ -160,8 +161,8 @@ struct symtab {
 	mvtyp valoff;
 	const usch *file;
 	int line;
-	unsigned char type:4,	/* macro type */
-		      wraps:1;	/* macro wraps in buffer */
+	char type:4,	/* macro type */
+	      wraps:1;	/* macro wraps in buffer */
 	unsigned char narg;	/* # of args (if feasible) */
 };
 
@@ -190,7 +191,7 @@ enum { NUMBER = 257, UNUMBER, LS, RS, EQ, NE, STRING, WSPACE, CMNT, IDENT,
 
 struct symtab *lookup(const usch *namep, int enterf);
 struct blocker;
-struct iobuf *submac(struct symtab *nl, int, struct iobuf *, struct blocker *);
+struct iobuf *submac(struct symtab *nl, int, struct iobuf *, int);
 struct iobuf *kfind(struct symtab *nl);
 void ppdir(void);
 
@@ -199,7 +200,7 @@ void include(void);
 void include_next(void);
 void line(void);
 
-int pushfile(const usch *fname, const usch *fn, int idx, void *incs);
+void pushfile(const usch *fname, const usch *fn, int idx, void *incs);
 void prtline(int nl);
 int yylex(void);
 void cunput(int);

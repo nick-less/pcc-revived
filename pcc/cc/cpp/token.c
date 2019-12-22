@@ -1,4 +1,4 @@
-/*	$Id: token.c,v 1.192 2019/08/20 14:32:23 ragge Exp $	*/
+/*	$Id: token.c,v 1.197 2019/12/19 21:11:15 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2009 Anders Magnusson. All rights reserved.
@@ -168,7 +168,11 @@ inpbuf(int n)
 
 	if (ifiles->infil == -1)
 		return 0;
+#if LIBVMF
+	len = (int)read(ifiles->infil, ib->buf+PBMAX, BYTESPERSEG-PBMAX);
+#else
 	len = (int)read(ifiles->infil, ib->buf+PBMAX, CPPBUF-PBMAX);
+#endif
 	if (len == -1)
 		error("read error on file %s", ifiles->orgfn);
 	if (len > 0) {
@@ -350,8 +354,8 @@ ucn(int n)
 	while (n-- > 0) {
 		if ((ch = qcchar()) == 0 || (spechr[ch] & C_HEX) == 0) {
 			warning("invalid universal character name");
-			// XXX should actually unput the chars and return 0
-			unch(ch); // XXX eof
+			/* XXX should actually unput the chars and return 0 */
+			unch(ch); /* XXX eof */
 			break;
 		}
 		cp = cp * 16 + dig2num(ch);
@@ -866,6 +870,7 @@ yylex(void)
 			while (ISID(*yyinp))
 				yyinp++;
 			yynode.nd_val = 0;
+			yynode.op = NUMBER;
 			return NUMBER;
 		}
 		return ch;
@@ -877,9 +882,8 @@ yylex(void)
 /*
  * A new file included.
  * If ifiles == NULL, this is the first file and already opened (stdin).
- * Return 0 on success, -1 if file to be included is not found.
  */
-int
+void
 pushfile(const usch *file, const usch *fn, int idx, void *incs)
 {
 	struct includ ibuf;
@@ -891,7 +895,7 @@ pushfile(const usch *file, const usch *fn, int idx, void *incs)
 
 	if (file != NULL) {
 		if ((ic->infil = open((const char *)file, O_RDONLY)) < 0)
-			return -1;
+			error("pushfile: error open %s", file);
 		ic->orgfn = ic->fname = file;
 		if (++inclevel > MAX_INCLEVEL)
 			error("limit for nested includes exceeded");
@@ -938,7 +942,6 @@ pushfile(const usch *file, const usch *fn, int idx, void *incs)
 #endif
 	close(ic->infil);
 	bufree(ic->ib);
-	return 0;
 }
 
 /*
@@ -967,14 +970,15 @@ prtline(int nl)
 		if (ifiles->idx == SYSINC)
 			strtobuf((usch *)" 3", &pb);
 		if (nl) strtobuf((usch *)"\n", &pb);
-	}
+	} else
+		putob(&pb, '\n');
 }
 
 void
 cunput(int c)
 {
 #ifdef PCC_DEBUG
-//	if (dflag)printf(": '%c'(%d)\n", c > 31 ? c : ' ', c);
+/*	if (dflag)printf(": '%c'(%d)\n", c > 31 ? c : ' ', c); */
 #endif
 	unch(c);
 }
@@ -1356,7 +1360,7 @@ again:		switch (ch) {
 				if (ch == '\\')
 					qcchar();
 				if (ch == '\n')
-					return;
+					goto again;
 			}
 			break;
 		case '\"':
@@ -1369,8 +1373,7 @@ again:		switch (ch) {
 					incmnt = 0;
 					break;
 				case '\n':
-					unch(ch);
-					/* FALLTHROUGH */
+					goto again;
 				case 0:
 					instr = 0;
 					return;
