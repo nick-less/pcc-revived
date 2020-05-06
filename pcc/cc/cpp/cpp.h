@@ -1,4 +1,4 @@
-/*	$Id: cpp.h,v 1.113 2019/12/14 15:03:16 ragge Exp $	*/
+/*	$Id: cpp.h,v 1.121 2020/02/16 11:19:36 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2010 Anders Magnusson (ragge@ludd.luth.se).
@@ -30,7 +30,12 @@
 #include <vmf.h>
 #endif
 
-typedef unsigned char usch;
+typedef char usch;
+#ifdef CHAR_UNSIGNED
+#define SPECADD	0
+#else
+#define SPECADD	128
+#endif
 
 extern	int	trulvl;
 extern	int	flslvl;
@@ -41,6 +46,7 @@ extern	int	tflag, Aflag, Cflag, Pflag;
 extern	int	Mflag, dMflag, MPflag, MMDflag;
 extern	char	*Mfile, *MPfile;
 extern	int	defining, inclevel;
+extern	int	escln;	/* escaped newlines, to be added */
 
 /* args for lookup() */
 #define FIND    0
@@ -48,7 +54,7 @@ extern	int	defining, inclevel;
 
 /* buffer used internally */
 #if SIZEOF_INT_P == 2 || LIBVMF
-#define CPPL2	10
+#define CPPL2	7
 typedef	unsigned short mvtyp;
 #else
 #define CPPL2	14
@@ -56,9 +62,16 @@ typedef	unsigned int mvtyp;
 #endif
 
 #define	CPPBUF		(1 << CPPL2)
-#define	VALPTR(x)	((x) & (CPPBUF-1))
-#define	VALBUF(x)	((x) >> CPPL2)
-#define	MKVAL(b, c)	(((b) << CPPL2) + (c))
+#if CPPBUF < 1024
+#define	MINBUF	1024	/* must be == BYTESPERSEG */
+#else
+#define	MINBUF	CPPBUF
+#endif
+#define	VALPTR(x)	((x) & (MINBUF-1))
+#define	VALBUF(x)	((x) / MINBUF)
+#define	MKVAL(b, c)	(((b) * MINBUF) + (c))
+
+extern usch pbbeg[], *pbinp, *pbend;
 
 #define	MAXARGS	128	/* Max # of args to a macro. Should be enough */
 #define	MAXIDSZ	63	/* Max length of C99 identifier; 5.2.4.1 */
@@ -85,27 +98,32 @@ typedef	unsigned int mvtyp;
 #define	BLKID2	5	/* ENQ, not legal char */
 
 /* Used in macro expansion */
-#define	L2MAX	32			/* max index into blocker pages */
+#define	L2MAX	64			/* max index into blocker pages */
 #define	MKB(l,h)	(l+((h)<<8))
 
 /* quick checks for some characters */
 #define C_SPEC	0001		/* for fastscan() parsing */
 #define C_2	0002		/* for yylex() tokenizing */
-#define C_WSNL	0004		/* ' ','\t','\r','\n' */
-#define C_ID	0010		/* [_a-zA-Z0-9] */
+#define C_WSNL	0004		/* [ \t\r\n] */
+#define	C_PACK	0010		/* [\0\\\?\r] */
+#define C_ID	(C_ID0|C_DIGIT)	/* [_a-zA-Z0-9] */
 #define C_ID0	0020		/* [_a-zA-Z] */
-#define C_Q	0040		/* [\r\\\?] */
+#define C_Q	0040		/* [\0/] */
 #define C_DIGIT	0100		/* [0-9] */
-#define C_HEX	0200		/* [0-9a-fA-F] */
+#define C_ESTR	0200		/* [\0\n\\\'\"] */
 
-extern usch spechr[];
+extern short spechr[];
 
-#define ISWSNL(x)	(spechr[x] & (C_WSNL))
+#define ISSPEC(x)	((SPECADD+spechr)[(int)(x)] & (C_SPEC))
+#define ISC2(x)		((SPECADD+spechr)[(int)(x)] & (C_2))
+#define ISWSNL(x)	((SPECADD+spechr)[(int)(x)] & (C_WSNL))
 #define ISWS(x)		((x) == '\t' || (x) == ' ')
-#define ISID(x)		(spechr[x] & C_ID)
-#define ISID0(x)	(spechr[x] & C_ID0)
-#define	ISDIGIT(x)	(spechr[x] & C_DIGIT)
-#define	ISCQ(x)		(spechr[x] & C_Q)
+#define ISPACK(x)	((SPECADD+spechr)[(int)(x)] & C_PACK)
+#define ISID(x)		((SPECADD+spechr)[(int)(x)] & C_ID)
+#define ISID0(x)	((SPECADD+spechr)[(int)(x)] & C_ID0)
+#define	ISDIGIT(x)	((SPECADD+spechr)[(int)(x)] & C_DIGIT)
+#define	ISCQ(x)		((SPECADD+spechr)[(int)(x)] & C_Q)
+#define	ISESTR(x)	((SPECADD+spechr)[(int)(x)] & C_ESTR)
 
 /* buffer definition */
 #define	BNORMAL	0	/* standard buffer */
@@ -121,7 +139,6 @@ struct iobuf {
 struct iobuf *getobuf(int);
 void putob(struct iobuf *ob, int ch);
 void bufree(struct iobuf *iob);
-extern struct iobuf pb;
 
 #define	curptr	ib->cptr
 #define	maxread	ib->bsz
@@ -140,9 +157,9 @@ struct includ {
 	const usch *fname;	/* current fn, changed if #line found */
 	const usch *orgfn;	/* current fn, not changed */
 	int lineno;
-	int escln;		/* escaped newlines, to be added */
 	int infil;
-	struct iobuf *ib;
+	int opend, oinp;
+	usch *opbeg;
 	int idx;
 	void *incs;
 	const usch *fn;
@@ -154,6 +171,7 @@ struct includ {
 #define SYSINC 1
 
 extern struct includ *ifiles;
+extern usch *pbeg, *pend, *outp, *inp;
 
 /* Symbol table entry  */
 struct symtab {
@@ -177,12 +195,14 @@ struct nd {
 	union {
 		long long val;
 		unsigned long long uval;
+		struct iobuf *ob;
 	} n;
 };
 extern struct nd yynode;
 
 #define nd_val n.val
 #define nd_uval n.uval
+#define nd_ob n.ob
 
 enum { NUMBER = 257, UNUMBER, LS, RS, EQ, NE, STRING, WSPACE, CMNT, IDENT,
 	OROR, ANDAND, DEFINED, LE, GE };
@@ -218,10 +238,9 @@ int inc2(void);
 void Ccmnt2(struct iobuf *, int);
 usch *bufid(int ch, struct iobuf *);
 usch *readid(int ch);
-struct iobuf *faststr(int bc, struct iobuf *);
-int fastnum(int ch, struct iobuf *);
+void faststr(int bc, struct iobuf *);
 void *xrealloc(void *p, int sz);
 void *xmalloc(int sz);
 void fastscan(void);
 void cntline(void);
-struct iobuf *savln(void);
+int inpbuf(void);
