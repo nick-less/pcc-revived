@@ -1,4 +1,4 @@
-/*	$Id: cc.c,v 1.319 2018/11/21 18:25:10 ragge Exp $	*/
+/*	$Id: cc.c,v 1.325 2020/04/11 16:10:22 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2011 Joerg Sonnenberger <joerg@NetBSD.org>.
@@ -88,9 +88,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef HAVE_LIBGEN_H
-#include <libgen.h>
-#endif
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -256,6 +253,7 @@ static int compile_input(char *input, char *output);
 static int assemble_input(char *input, char *output);
 static int run_linker(void);
 static int strlist_exec(struct strlist *l);
+static char *select_linker(char *);
 
 char *cat(const char *, const char *);
 char *setsuf(char *, char);
@@ -311,7 +309,7 @@ int	xuchar = 0;
 #endif
 int	cxxflag;
 int	cppflag;
-int	printprogname, printfilename;
+int	printprogname, printfilename, printsearchdirs;
 enum { SC11, STRAD, SC89, SGNU89, SC99, SGNU99 } cstd;
 
 #ifdef SOFTFLOAT
@@ -351,6 +349,7 @@ struct Wflags {
 	{ "unreachable-code", INWEXTRA },
 	{ "deprecated-declarations", INWEXTRA },
 	{ "attributes", 0 },
+	{ "uninitialized", INWEXTRA },
 	{ NULL, 0 },
 };
 
@@ -624,6 +623,12 @@ main(int argc, char *argv[])
 			} else if (match(u, "stack-protector") ||
 			    match(u, "stack-protector-all")) {
 				sspflag = j ? 0 : 1;
+			} else if (match(u, "use-ld=")) {
+				/* ignore nonsense -fno-use-ld=* command */
+				if (j)
+					break;
+				u += 7;
+				ld = select_linker(u);
 			}
 			/* silently ignore the rest */
 			break;
@@ -760,6 +765,8 @@ main(int argc, char *argv[])
 			} else if (match(argp, "-print-libgcc-file-name")) {
 				fname = "libpcc.a";
 				printfilename = 1;
+			} else if (match(argp, "-print-search-dirs")) {
+				printsearchdirs = 1;
 			} else if (match(argp, "-pie")) {
 				strlist_append(&middle_linker_flags, argp);
 				pieflag = 1;
@@ -996,7 +1003,7 @@ main(int argc, char *argv[])
 	case SC11: c89defs = c11defs = 1; break;
 	}
 
-	if (ninput == 0 && !(printprogname || printfilename))
+	if (ninput == 0 && !(printprogname || printfilename || printsearchdirs))
 		errorx(8, "no input files");
 	if (outfile && (cflag || Sflag || Eflag) && ninput > 1)
 		errorx(8, "-o given with -c || -E || -S and more than one file");
@@ -1037,6 +1044,15 @@ main(int argc, char *argv[])
 		return 0;
 	} else if (printfilename) {
 		printf("%s\n", find_file(fname, &crtdirs, R_OK));
+		return 0;
+	} else if (printsearchdirs) {
+		printf("install: %s\n", LIBEXECDIR);
+		printf("programs: =");
+		strlist_print(&progdirs, stdout, 0, ":");
+		printf("\n");
+		printf("libraries: =");
+		strlist_print(&crtdirs, stdout, 0, ":");
+		printf("\n");
 		return 0;
 	}
 
@@ -1301,9 +1317,9 @@ assemble_input(char *input, char *output)
 	PCC_EARLY_AS_ARGS
 #endif
 	strlist_append_list(&args, &assembler_flags);
-	strlist_append(&args, input);
 	strlist_append(&args, "-o");
 	strlist_append(&args, output);
+	strlist_append(&args, input);
 	strlist_prepend(&args,
 	    find_file(as, &progdirs, X_OK));
 #ifdef PCC_LATE_AS_ARGS
@@ -1382,6 +1398,28 @@ run_linker(void)
 	strlist_free(&linker_flags);
 	return retval;
 }
+
+static char *
+select_linker(char *name)
+{
+	static char ld_name[8];
+ 
+	/* Short names first.  */
+	if (strcmp(name, "bfd") == 0 ||
+	    strcmp(name, "gold") == 0 ||
+	    strcmp(name, "lld") == 0) {
+		snprintf(ld_name, sizeof ld_name, "ld.%s", name);
+		return ld_name;
+	}
+ 
+	/* Must be absolute path otherwise.  */
+	if (name[0] != '/')
+		return LINKER;
+ 
+	return name;
+}
+
+
 
 static char *cxxt[] = { "cc", "cp", "cxx", "cpp", "CPP", "c++", "C" };
 int
@@ -1500,7 +1538,7 @@ strlist_exec(struct strlist *l)
 	strlist_make_array(l, &argv, &argc);
 	if (vflag) {
 		printf("Calling ");
-		strlist_print(l, stdout, noexec);
+		strlist_print(l, stdout, noexec, " ");
 		printf("\n");
 	}
 	if (noexec)
@@ -1774,6 +1812,9 @@ static char *fpflags[] = {
 #ifdef TARGET_FLT_EVAL_METHOD
 	"-D__FLT_EVAL_METHOD__=" MKS(TARGET_FLT_EVAL_METHOD),
 #endif
+#ifdef mach_i386
+	"-D__STDC_IEC_559__",
+#endif
 #ifdef FLT_PREFIX
 	"-D__FLT_RADIX__=" MKS(C(FLT_PREFIX,_RADIX)),
 	"-D__FLT_DIG__=" MKS(C(FLT_PREFIX,_DIG)),
@@ -1785,6 +1826,8 @@ static char *fpflags[] = {
 	"-D__FLT_MIN_10_EXP__=" MKS(C(FLT_PREFIX,_MIN_10_EXP)),
 	"-D__FLT_MIN_EXP__=" MKS(C(FLT_PREFIX,_MIN_EXP)),
 	"-D__FLT_MIN__=" MKS(C(FLT_PREFIX,_MIN)),
+	"-D__FLT_HAS_SUBNORM__=" MKS(C(FLT_PREFIX,_HAS_SUBNORM)),
+	"-D__FLT_TRUE_MIN__=" MKS(C(FLT_PREFIX,_TRUE_MIN)),
 #endif
 #ifdef DBL_PREFIX
 	"-D__DBL_DIG__=" MKS(C(DBL_PREFIX,_DIG)),
@@ -1796,6 +1839,8 @@ static char *fpflags[] = {
 	"-D__DBL_MIN_10_EXP__=" MKS(C(DBL_PREFIX,_MIN_10_EXP)),
 	"-D__DBL_MIN_EXP__=" MKS(C(DBL_PREFIX,_MIN_EXP)),
 	"-D__DBL_MIN__=" MKS(C(DBL_PREFIX,_MIN)),
+	"-D__DBL_HAS_SUBNORM__=" MKS(C(DBL_PREFIX,_HAS_SUBNORM)),
+	"-D__DBL_TRUE_MIN__=" MKS(C(DBL_PREFIX,_TRUE_MIN)),
 #endif
 #ifdef LDBL_PREFIX
 	"-D__LDBL_DIG__=" MKS(C(LDBL_PREFIX,_DIG)),
@@ -1807,6 +1852,8 @@ static char *fpflags[] = {
 	"-D__LDBL_MIN_10_EXP__=" MKS(C(LDBL_PREFIX,_MIN_10_EXP)),
 	"-D__LDBL_MIN_EXP__=" MKS(C(LDBL_PREFIX,_MIN_EXP)),
 	"-D__LDBL_MIN__=" MKS(C(LDBL_PREFIX,_MIN)),
+	"-D__LDBL_HAS_SUBNORM__=" MKS(C(LDBL_PREFIX,_HAS_SUBNORM)),
+	"-D__LDBL_TRUE_MIN__=" MKS(C(LDBL_PREFIX,_TRUE_MIN)),
 #endif
 	NULL
 };
@@ -1858,12 +1905,12 @@ setup_cpp_flags(void)
 #ifdef STDINC_MA
 	strlist_append(&sysincdirs, "=" STDINC_MA);
 #endif
-	strlist_append(&sysincdirs, "=" STDINC);
 #ifdef PCCINCDIR
 	if (cxxflag)
 		strlist_append(&sysincdirs, "=" PCCINCDIR "/c++");
 	strlist_append(&sysincdirs, "=" PCCINCDIR);
 #endif
+	strlist_append(&sysincdirs, "=" STDINC);
 }
 
 struct flgcheck ccomflgcheck[] = {
@@ -1924,7 +1971,7 @@ struct flgcheck asflgcheck[] = {
 #if defined(os_darwin)
 	{ &Bstatic, 1, "-static" },
 #endif
-#if !defined(USE_YASM)
+#if !defined(USE_YASM) && !defined(NO_AS_V)
 	{ &vflag, 1, "-v" },
 #endif
 #if defined(os_openbsd) && defined(mach_mips64)

@@ -1,4 +1,4 @@
-/*	$Id: code.c,v 1.91 2018/12/01 17:18:55 ragge Exp $	*/
+/*	$Id: code.c,v 1.94 2020/04/10 20:00:08 plunky Exp $	*/
 /*
  * Copyright (c) 2008 Michael Shalayeff
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
@@ -569,6 +569,19 @@ bjobcode(void)
 	nfree(q);
 	nfree(p);
 
+#ifdef GCC_COMPAT
+	/*
+	 * gcc defines __float128 on amd64.  We handcraft a typedef 
+	 * of long double here to make glibc happy. (size is same).
+	 */
+	p = bdty(NAME, c = addname("__float128"));
+	p = tymerge(q = mkty(LDOUBLE, 0, 0), p);
+	p->n_sp = lookup(c, 0);
+	defid(p, TYPEDEF);
+	nfree(q);
+	nfree(p);
+#endif
+
 	/* for the static varargs functions */
 #define	MKN(vn, rn) \
 	{ vn = addname(rn); sp = lookup(vn, SNORMAL); \
@@ -801,11 +814,9 @@ fillstr(struct symtab *sp)
 {
 	int cl = NO_CLASS;
 	TWORD t;
-	int sz;
 
 	for (; sp; sp = sp->snext) {
 		t = sp->stype;
-		sz = (int)tsize(t, sp->sdf, sp->sap);
 		while (ISARY(t))
 			t = DECREF(t);
 

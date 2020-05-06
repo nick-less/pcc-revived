@@ -1,4 +1,4 @@
-/*      $Id: match.c,v 1.105 2017/03/11 09:22:09 ragge Exp $   */
+/*      $Id: match.c,v 1.107 2019/05/01 06:34:19 ragge Exp $   */
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -596,7 +596,8 @@ findops(NODE *p, int cookie)
 
 		/* Help register assignment after SSA by preferring */
 		/* 2-op insns instead of 3-ops */
-		if (xssa && (q->rewrite & RLEFT) == 0 && shl == SRDIR)
+		if (xssa && (q->rewrite & RLEFT) == 0 &&
+		    (q->lshape & (INREGS)) && shl == SRDIR)
 			shl = SRREG;
 
 #ifdef NEWNEED
@@ -626,13 +627,8 @@ findops(NODE *p, int cookie)
 
 	sh = -1;
 
-#ifdef mach_pdp11
-	if (cookie == FORCC && p->n_op != AND)	/* XXX - fix */
-		cookie = INREGS;
-#else
 	if (cookie == FORCC)
 		cookie = INREGS;
-#endif
 
 	sh = shswitch(sh, p->n_left, qq->lshape, cookie,
 	    qq->rewrite & RLEFT, gol);
@@ -954,6 +950,7 @@ findumul(NODE *p, int cookie)
 	F2DEBUG(("findumul: node %p (%s)\n", p, prcook(1 << sh)));
 	p->n_su = MKIDX(ixp[i], 0);
 	SCLASS(p->n_su, sh);
+	F2WALK(p);
 	return sh;
 }
 

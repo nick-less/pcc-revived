@@ -1,4 +1,4 @@
-/*	$Id: ccconfig.h,v 1.32 2016/07/06 07:49:48 ragge Exp $	*/
+/*	$Id: ccconfig.h,v 1.34 2019/09/07 11:59:03 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004 Anders Magnusson (ragge@ludd.luth.se).
@@ -41,10 +41,13 @@
 #define	DYNLINKLIB	"/usr/libexec/ld.elf_so"
 
 #define CRTEND_T	"crtend.o"
+#define RCRT0		"crt0.o"
 
+#ifdef notdef	/* NetBSD needs libpcc now */
 #define DEFLIBS		{ "-lc", NULL }
 #define DEFPROFLIBS	{ "-lc_p", NULL }
 #define DEFCXXLIBS	{ "-lp++", "-lc", NULL }
+#endif
 
 #if defined(mach_amd64)
 #define CPPMDADD \
