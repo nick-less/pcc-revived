@@ -1,4 +1,4 @@
-/*	$Id: token.c,v 1.211 2020/02/26 17:58:19 ragge Exp $	*/
+/*	$Id: token.c,v 1.213 2020/06/29 07:41:07 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2009 Anders Magnusson. All rights reserved.
@@ -251,6 +251,9 @@ psave:				if (pend-p < 3) {
 					goto psave;
 				if (p[1] == '\n' || (p[1] | 040) == 'u')
 					goto slow;
+				/* avoid fake escape next loop */
+				if (p[1] == '\\')
+					p++;
 				break;
 
 			default:
@@ -1206,6 +1209,7 @@ charcon(void)
 			while (ISDIGIT(c = qcchar()) ||
 			    ((c|040) >= 'a' && (c|040) <= 'f'))
 				val = val * 16 + dig2num(c);
+			*--inp = c;
 			break;
 		case '0': case '1': case '2': case '3': case '4':
 		case '5': case '6': case '7':
