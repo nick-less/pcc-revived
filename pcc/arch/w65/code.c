@@ -41,9 +41,7 @@ extern int gotnr;
 /*
  * Print out assembler segment name.
  */
-void
-setseg(int seg, char *name)
-{
+void setseg(int seg, char *name) {
 	switch (seg) {
 	case PROG: name = ".segment 	\"CODE\""; break;
 	case DATA:
@@ -66,17 +64,22 @@ setseg(int seg, char *name)
 	printf("\t%s\n", name);
 }
 
+static char* mygettype (int size) {
+	switch (size) {
+		case 2:
+		return ".word";
+		case 4:
+		return ".dword";
+	}
+	return ".byte";
+}
 /*
  * Define everything needed to print out some data (or text).
  * This means segment, alignment, visibility, etc.
  */
-void
-defloc(struct symtab *sp)
-{
+void defloc(struct symtab *sp) {
 	char *name;
-
-
-
+printf("defloc %s", sp->sname);
 	name = getexname(sp);
 	if (sp->sclass == EXTDEF) {
 		printf("\t.global %s\n", name);
@@ -87,6 +90,9 @@ defloc(struct symtab *sp)
 			printf(";\t.type %s,@object\n", name);
 			printf(";\t.size %s,%d\n", name,
 			    (int)tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR);
+
+//			printf("%s:\t%s\t", name, mygettype(tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR));
+			
 		}
 	}
 	if (sp->slevel == 0)
@@ -102,79 +108,47 @@ defloc(struct symtab *sp)
  */
 int sttemp;
 
-void
-efcode(void)
-{
-	NODE *p, *q;
-
-	gotnr = 0;
+void efcode(void) {
 	if (cftnsp->stype != STRTY+FTN && cftnsp->stype != UNIONTY+FTN)
 		return;
-	/* use stasg to get call to memcpy() */
-	p = buildtree(UMUL, tempnode(sttemp, INCREF(STRTY),
-	    cftnsp->sdf, cftnsp->sap), NIL);
-	q = block(REG, 0, 0, INCREF(STRTY), cftnsp->sdf, cftnsp->sap);
-	regno(q) = XX;
-	q = buildtree(UMUL, q, NIL);
-	p = buildtree(ASSIGN, p, q);
-	ecomp(p);
 }
 
 /*
  * code for the beginning of a function; a is an array of
  * indices in symtab for the arguments; n is the number
  */
-void
-bfcode(struct symtab **s, int cnt)
-{
-	struct symtab *sp2;
-	NODE *n, *p;
-	int i;
+void bfcode(struct symtab **sp, int cnt) {
+	NODE *p, *p2;
+	char *c;
+	int i, l;
+	printf("bfcode\n");
+return ;
+	/* handcraft isz */
+	l = strlen(cftnsp->sname)+10;
+	c = tmpalloc(l);
+	snprintf(c, l, "	isz %s\n", exname(cftnsp->sname));
 
-	if (kflag) { /* PIC code */
-		/* Generate extended assembler for PIC prolog */
-		p = tempnode(0, CHAR|PTR, 0, 0);
-		gotnr = regno(p);
-		p = block(XARG, p, NIL, INT, 0, 0);
-		p->n_name = "=r";
-		p = block(XASM, p, bcon(0), INT, 0, 0);
-
-		p->n_name = "lea (%%pc,_GLOBAL_OFFSET_TABLE_@GOTPC),%0\n";
-		p->n_right->n_type = STRTY;
+	/* Convert param symtab entries to NAMEs */
+	for (i = 0; i < cnt; i++) {
+		sp[i]->sclass = STATIC;
+		sp[i]->soffset = getlab();
+		p2 = cast(buildtree(ADDROF,
+			nametree(cftnsp), 0), INCREF(INCREF(sp[i]->stype)), 0);
+		p = buildtree(ASSIGN, nametree(sp[i]),
+		    buildtree(UMUL, buildtree(UMUL, p2, 0), 0));
 		ecomp(p);
+		send_passt(IP_ASM, c);
+		printf(LABFMT ":	0\n", sp[i]->soffset);
 	}
-
-	if (cftnsp->stype == STRTY+FTN || cftnsp->stype == UNIONTY+FTN) {
-		n = tempnode(0, INCREF(CHAR), 0, 0);
-		p = block(REG, 0, 0, INCREF(CHAR), 0, 0);
-		regno(p) = XX;
-		sttemp = regno(n);
-		ecomp(buildtree(ASSIGN, n, p));
-	}
-
-	if (xtemps == 0)
-		return;
-
-        /* put arguments in temporaries */
-        for (i = 0; i < cnt; i++) {
-                if (s[i]->stype == STRTY || s[i]->stype == UNIONTY ||
-                    cisreg(s[i]->stype) == 0)
-                        continue;
-                if (cqual(s[i]->stype, s[i]->squal) & VOL)
-                        continue;
-                sp2 = s[i];
-                n = tempnode(0, s[i]->stype, s[i]->sdf, s[i]->sap);
-                n = buildtree(ASSIGN, n, nametree(sp2));
-                s[i]->soffset = regno(n->n_left);
-                s[i]->sflags |= STNODE;
-                ecomp(n);
-        }
 }
 
 
 /* called just before final exit */
 /* flag is 1 if errors, 0 if none */
 void ejobcode(int flag) {
+	printf("ejobcode%d\n", 0);
+	fflush(stdout);
+
 	if (flag)
 		return;
 
@@ -193,8 +167,10 @@ void bjobcode(void) {
 
 	/* Set correct names for our types */
 	astypnames[SHORT] = astypnames[USHORT] = "\t.word";
-	astypnames[INT] = astypnames[UNSIGNED] = "\t.dword";
+	astypnames[INT] = astypnames[UNSIGNED] = "\t.word";
 	astypnames[LONG] = astypnames[ULONG] = "\t.dword";
+	astypnames[LONGLONG] = astypnames[ULONGLONG] = "\t.res 8,0";
+	fflush(stdout);
 
 }
 
@@ -203,53 +179,51 @@ void bjobcode(void) {
  * This is done early in buildtree() and only done once.
  * Returns p.
  */
-NODE *
-funcode(NODE *p)
-{
+NODE * funcode(NODE *p) {
 	NODE *r, *l;
+	TWORD t = DECREF(DECREF(p->n_left->n_type));
+	int stcall;
 
-	/* Fix function call arguments. On m68k, just add funarg */
+	stcall = ISSOU(t);
+	/*
+	 * We may have to prepend:
+	 * - Hidden arg0 for struct return (in reg or on stack).
+	 * - ebx in case of PIC code.
+	 */
+
+	/* Fix function call arguments. On x86, just add funarg */
 	for (r = p->n_right; r->n_op == CM; r = r->n_left) {
-		if (r->n_right->n_op != STARG) {
-			r->n_right = intprom(r->n_right);
+		if (r->n_right->n_op != STARG)
 			r->n_right = block(FUNARG, r->n_right, NIL,
 			    r->n_right->n_type, r->n_right->n_df,
 			    r->n_right->n_ap);
-		}
 	}
 	if (r->n_op != STARG) {
 		l = talloc();
 		*l = *r;
 		r->n_op = FUNARG;
 		r->n_left = l;
-		r->n_left = intprom(r->n_left);
-		r->n_type = r->n_left->n_type;
+		r->n_type = l->n_type;
 	}
 	return p;
 
 }
 
 /* fix up type of field p */
-void
-fldty(struct symtab *p)
-{
+void fldty(struct symtab *p) {
 }
 
 /*
  * XXX - fix genswitch.
  */
-int
-mygenswitch(int num, TWORD type, struct swents **p, int n)
-{
+int mygenswitch(int num, TWORD type, struct swents **p, int n) {
 	return 0;
 }
 
 /*
  * Return return as given by a.
  */
-NODE *
-builtin_return_address(const struct bitable *bt, NODE *a)
-{
+NODE * builtin_return_address(const struct bitable *bt, NODE *a) {
 	int nframes;
 	NODE *f;
 
@@ -272,9 +246,7 @@ cerror((char *)__func__);
 /*
  * Return frame as given by a.
  */
-NODE *
-builtin_frame_address(const struct bitable *bt, NODE *a)
-{
+NODE * builtin_frame_address(const struct bitable *bt, NODE *a) {
 	int nframes;
 	NODE *f;
 
@@ -295,8 +267,7 @@ cerror((char *)__func__);
  * Return "canonical frame address".
  */
 NODE *
-builtin_cfa(const struct bitable *bt, NODE *a)
-{
+builtin_cfa(const struct bitable *bt, NODE *a) {
 	NODE *f;
 
 cerror((char *)__func__);

@@ -25,7 +25,7 @@
  */
 
 
-# include "pass2.h"
+#include "pass2.h"
 
 #include <string.h>
 
@@ -34,9 +34,10 @@ int canaddr(NODE *);
 /* is it legal to make an OREG or NAME entry which has an
  * offset of off, (from a register of r), if the
  * resulting thing had type t */
-int
-notoff(TWORD t, int r, CONSZ off, char *cp)
-{
+int notoff(TWORD t, int r, CONSZ off, char *cp) {
+
+	return(1);  /* NO */
+
 	if (off > MAX_SHORT || off < MIN_SHORT)
 		return 1; /* max signed 16-bit offset */
 	return(0);  /* YES */
@@ -51,89 +52,137 @@ notoff(TWORD t, int r, CONSZ off, char *cp)
  *
  * So far we only handle the trivial OREGs here.
  */
-void
-offstar(NODE *p, int shape)
-{
-	NODE *q;
+void offstar(NODE *p, int shape) {
+	NODE *r;
 
-	if (x2debug) {
-		printf("offstar(%p)\n", p);
-		fwalk(p, e2print, 0);
+fprintf(stderr, "offstar %p, %d\n", p, shape);
+
+ 	if (isreg(p))
+		return; /* Is already OREG */
+
+	r = p->n_right;
+	if( p->n_op == PLUS || p->n_op == MINUS ){
+		if( r->n_op == ICON ){
+			if (isreg(p->n_left) == 0) {
+				(void)geninsn(p->n_left, INAREG);
+				/* Converted in ormake() */
+			}
+			return;
+		}
+		if (r->n_op == LS && r->n_right->n_op == ICON &&
+		    getlval(r->n_right) == 2 && p->n_op == PLUS) {
+			if (isreg(p->n_left) == 0) {
+ 				(void)geninsn(p->n_left, INAREG);
+			}
+			if (isreg(r->n_left) == 0) {
+				(void)geninsn(r->n_left, INAREG);
+			}
+			return;
+		}
 	}
-
-	if (isreg(p))
-		return; /* Matched (%a0) */
-
-	q = p->n_right;
-	if ((p->n_op == PLUS || p->n_op == MINUS) && q->n_op == ICON &&
-	    notoff(0, 0, getlval(q), 0) == 0 && !isreg(p->n_left)) {
-		(void)geninsn(p->n_left, INBREG);
-		return;
-	}
-	(void)geninsn(p, INBREG);
+	(void)geninsn(p, INAREG);
 }
+
+
+/*
+ * Shape matches for UMUL.  Cooperates with offstar().
+ */
+int shumul(NODE *p, int shape) {
+fprintf(stderr, "shumul %p, %08x %s\n", p, shape, prcook(shape));
+
+
+	if (shape & SOREG) {
+		fprintf(stderr,"shumul SROREG\n");
+		return SROREG;
+	}
+	if ((shape & STARNM) && (p->n_op == NAME)) {
+		fprintf(stderr,"shumul SRDIR\n");
+		return SRDIR;
+	}
+	if (shape & STARREG) {
+		fprintf(stderr,"shumul SROREG\n");
+		return SROREG;
+	}
+		fprintf(stderr,"shumul SRNOPE\n");
+	return SRNOPE;
+}
+
 
 /*
  * Do the actual conversion of offstar-found OREGs into real OREGs.
  * For simple OREGs conversion should already be done.
  */
-void
-myormake(NODE *q)
-{
-}
+void myormake(NODE *q) {
+		NODE *p, *r;
 
-/*
- * Shape matches for UMUL.  Cooperates with offstar().
- */
-int
-shumul(NODE *p, int shape)
-{
+fprintf(stderr, "myormake %p %d %d\n", q, q->n_op, q->n_left->n_op);
+//		fwalk(q, e2print, 0);
+return;
+	p = q->n_left;
+	if (p->n_op == PLUS && (r = p->n_right)->n_op == LS &&
+	    r->n_right->n_op == ICON && getlval(r->n_right) == 2 &&
+	    p->n_left->n_op == REG && r->n_left->n_op == REG) {
+		q->n_op = OREG;
+		setlval(q, 0);
+		q->n_rval = R2PACK(p->n_left->n_rval, r->n_left->n_rval, 0);
+		tfree(p);
+	}
 
-	if (x2debug)
-		printf("shumul(%p)\n", p);
-
-	/* Turns currently anything into OREG on x86 */
-	if (shape & SOREG)
-		return SROREG;
-	return SRNOPE;
 }
 
 /*
  * Rewrite operations on binary operators (like +, -, etc...).
  * Called as a result of table lookup.
  */
-int
-setbin(NODE *p)
-{
+int setbin(NODE *p) {
 
 	if (x2debug)
-		printf("setbin(%p)\n", p);
+		fprintf(stderr, "setbin(%p)\n", p);
 	return 0;
 
 }
 
 /* setup for assignment operator */
-int
-setasg(NODE *p, int cookie)
-{
+int setasg(NODE *p, int cookie) {
+fprintf(stderr, "setasg %p, %s\n", p, prcook(cookie));
+		fwalk(p, e2print, 0);
+
 	if (x2debug)
 		printf("setasg(%p)\n", p);
 	return(0);
 }
 
 /* setup for unary operator */
-int
-setuni(NODE *p, int cookie)
-{
+int setuni(NODE *p, int cookie) {
 	return 0;
 }
 
 /*
  * Special handling of some instruction register allocation.
+ * - left is the register that left node wants.
+ * - right is the register that right node wants.
+ * - res is in which register the result will end up.
+ * - mask is registers that will be clobbered.
+ *
  */
-struct rspecial *
-nspecial(struct optab *q)
-{
+struct rspecial * nspecial(struct optab *q) {
+fprintf(stderr, "nspecial %p\n", q);
+
+
+switch (q->op) {
+	case ASSIGN:
+		// if (q->lshape == STARREG && q->rshape == SNAME) {
+		// 	static struct rspecial s[] = {
+		// 		{ NEVER, AC }, { NRES, AC }, { 0 }
+		// 	};
+		// 	return s;
+		// }
+		break;
+	default:
+		comperr("nspecial entry %d", q - table);
+	}
+	return 0;
+
 	// switch (q->op) {
 	// case STASG:
 	// 	{
@@ -151,20 +200,20 @@ nspecial(struct optab *q)
 /*
  * Set evaluation order of a binary node if it differs from default.
  */
-int
-setorder(NODE *p)
-{
+int setorder(NODE *p) {
 	return 0;
 }
 
 /*
  * set registers in calling conventions live.
  */
-int *
-livecall(NODE *p)
-{
-	 static int r[] = { XX, -1 };
-	 return &r[1];
+int * livecall(NODE *p) {
+
+	static int r[] = { -1 };
+	return r;
+
+	//  static int r[] = { AX, -1 };
+	//  return &r[1];
 
 	// if (p->n_op == STCALL)
 	// 	return r; /* only if struct return */
@@ -173,9 +222,11 @@ livecall(NODE *p)
 
 /*
  * Signal whether the instruction is acceptable for this target.
+ * Targets may use the unused bits in the visit field and
+ *	then check them here when generating code.
  */
-int
-acceptable(struct optab *op)
-{
+int acceptable(struct optab *op) {
+
+
 	return 1;
 }

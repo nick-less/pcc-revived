@@ -42,19 +42,27 @@
 #define	fwalk p1fwalk
 #endif
 
+#define IALLOC(sz)	(isinlining ? permalloc(sz) : tmpalloc(sz))
+
 
 /*	this file contains code which is dependent on the target machine */
 
 int gotnr;
 
+NODE * offcon(OFFSZ o, TWORD t, union dimfun *d, struct attr *ap) {
+	NODE *p;
 
+	if (t == (PTR|CHAR) || t == (PTR|UCHAR))
+		p = xbcon((o/SZCHAR), NULL, INTPTR);
+	else
+		p = xbcon((o/SZINT), NULL, INTPTR);
+	return p;
+}
 
 /*
  * Make a symtab entry for PIC use.
  */
-static struct symtab *
-picsymtab(char *p, char *s, char *s2)
-{
+static struct symtab * picsymtab(char *p, char *s, char *s2) {
 	struct symtab *sp = permalloc(sizeof(struct symtab));
 	size_t len = strlen(p) + strlen(s) + strlen(s2) + 1;
 	
@@ -73,30 +81,13 @@ picsymtab(char *p, char *s, char *s2)
 /*
  * Create a reference for an extern variable.
  */
-static NODE *
-picext(NODE *p)
-{
+static NODE * picext(NODE *p) {
 	NODE *q, *r;
 	struct symtab *sp;
 	char *name;
 
 	q = tempnode(gotnr, PTR|VOID, 0, 0);
 	name = getexname(p->n_sp);
-
-#ifdef notdef
-	struct attr *ga;
-	if ((ga = attr_find(p->n_sp->sap, GCC_ATYP_VISIBILITY)) &&
-	    strcmp(ga->sarg(0), "hidden") == 0) {
-		/* For hidden vars use GOTOFF */
-		sp = picsymtab("", name, "@GOTOFF");
-		r = xbcon(0, sp, INT);
-		q = buildtree(PLUS, q, r);
-		q = block(UMUL, q, 0, p->n_type, p->n_df, p->n_ap);
-		q->n_sp = p->n_sp; /* for init */
-		nfree(p);
-		return q;
-	}
-#endif
 
 	sp = picsymtab("", name, "@GOT");
 	r = xbcon(0, sp, INT);
@@ -108,9 +99,7 @@ picext(NODE *p)
 	return q;
 }
 
-static char *
-getsoname(struct symtab *sp)
-{
+static char * getsoname(struct symtab *sp) {
 	struct attr *ap;
 	return (ap = attr_find(sp->sap, ATTR_SONAME)) ?
 	    ap->sarg(0) : sp->sname;
@@ -118,9 +107,7 @@ getsoname(struct symtab *sp)
 }
 
 
-static NODE *
-picstatic(NODE *p)
-{
+static NODE * picstatic(NODE *p) {
 	NODE *q, *r;
 	struct symtab *sp;
 
@@ -157,27 +144,104 @@ picstatic(NODE *p)
  * in addition, any special features (such as rewriting
  * exclusive or) are easily handled here as well
  */
-NODE *
-clocal(NODE *p)
-{
+NODE * clocal(NODE *p) {
 
 	register struct symtab *q;
 	register NODE *r, *l;
 	register int o;
 	TWORD t;
 
+fprintf(stderr, "clocal %d\n", p->n_op);
+
+switch( o = p->n_op ){
+
+	case NAME:
+	fprintf(stderr, "clocal NAME \n");
+
+		if ((q = p->n_sp) == NULL) {
+			return p; /* Nothing to care about */
+		}
+			fprintf(stderr, "NAME %d (%s) : %x: %p \n", q->sclass, q->sname, p->n_rval, p->n_name);
+
+		switch (q->sclass) {
+			case PARAM:
+			fprintf(stderr, "param\n");
+			case AUTO:
+			fprintf(stderr, "auto %d %d\n", PTR, STRTY);
+				/* fake up a structure reference */
+				/* FIXME
+			r = block(REG, NIL, NIL, PTR+STRTY, 0, 0);
+			slval(r, 0);
+			r->n_rval = FPREG;
+			p = stref(block(STREF, r, p, 0, 0, 0));
+			*/
+			r = block(REG, NIL, NIL, PTR+STRTY, 0, 0);
+			slval(r, 0);
+			r->n_rval = FPREG;
+			p = stref(block(STREF, r, p, 0, 0, 0));
+
+				break;
+			case REGISTER:
+			fprintf(stderr, "register\n");
+				break;
+			case USTATIC:
+			case STATIC:
+			fprintf(stderr, "static\n");
+				break;
+		}
+		break;
+	case PCONV:
+			fprintf(stderr, "clocal PCONV\n");
+
+ 		if (coptype(p->n_left->n_op) == LTYPE) {
+			p->n_left->n_type = p->n_type;
+			p = p1nfree(p);
+		}
+		break;
+	case SCONV:
+		fprintf(stderr, "clocal SCONV\n");
+
+		l = p->n_left;
+		if (l->n_op == ICON && ISPTR(l->n_type)) {
+						fprintf(stderr, "SCONV\n");
+
+			/* Do immediate cast here */
+			/* Should be common code */
+			q = l->n_sp;
+			l->n_sp = NULL;
+			l->n_type = UNSIGNED;
+			if (concast(l, p->n_type) == 0) {
+				cerror("clocal SCONV");
+			}
+			p = nfree(p);
+			p->n_sp = q;
+		}
+
+
+		 if (l->n_op == NAME || l->n_op == UMUL ||
+		 	l->n_op == TEMP) {
+		 	l->n_type = p->n_type;
+		 	nfree(p);
+		 	return l;
+		 }
+
+		break;
+}
+return p;
+
+
 #ifdef PCC_DEBUG
 	if (xdebug) {
-		printf("clocal: %p\n", p);
+		fprintf(stderr, "clocal: %p\n", p);
 		fwalk(p, eprint, 0);
 	}
 #endif
 	switch( o = p->n_op ){
 
 	case NAME:
-		if ((q = p->n_sp) == NULL)
+		if ((q = p->n_sp) == NULL) {
 			return p; /* Nothing to care about */
-
+		}
 		switch (q->sclass) {
 
 		case PARAM:
@@ -266,7 +330,31 @@ clocal(NODE *p)
 			p = nfree(p);
 			p->n_sp = q;
 		}
+
+
+		 if (l->n_op == NAME || l->n_op == UMUL ||
+		 	l->n_op == TEMP) {
+		 	l->n_type = p->n_type;
+		 	nfree(p);
+		 	return l;
+		 }
+
 		break;
+		
+	case PCONV:
+		if (coptype(p->n_left->n_op) == LTYPE) {
+			p->n_left->n_type = p->n_type;
+			p = p1nfree(p);
+		}
+		break;
+
+	case PMCONV:
+	case PVCONV:
+		r = buildtree(o==PMCONV?MUL:DIV, p->n_left, p->n_right);
+		p1nfree(p);
+		p = r;
+		break;
+
 
 	case FORCE:
 		/* put return value in return reg */
@@ -281,18 +369,20 @@ clocal(NODE *p)
 	}
 #ifdef PCC_DEBUG
 	if (xdebug) {
-		printf("clocal end: %p\n", p);
+		fprintf(stderr,"clocal end: %p\n", p);
 		fwalk(p, eprint, 0);
 	}
 #endif
 	return(p);
 }
 
-#define IALLOC(sz)	(isinlining ? permalloc(sz) : tmpalloc(sz))
 
-void
-myp2tree(NODE *p)
-{
+void myp2tree(NODE *p) {
+
+fprintf(stderr, "myp2tree %d\n",__LINE__);
+	fwalk(p, eprint, 0);
+fprintf(stderr,"myp2tree %d\n",__LINE__);
+
 	struct symtab *sp;
 	NODE *l;
 
@@ -335,9 +425,7 @@ myp2tree(NODE *p)
 /*
  * Convert ADDROF NAME to ICON?
  */
-int
-andable(NODE *p)
-{
+int andable(NODE *p) {
 #ifdef notdef
 	/* shared libraries cannot have direct referenced static syms */
 	if (p->n_sp->sclass == STATIC || p->n_sp->sclass == USTATIC)
@@ -349,9 +437,8 @@ andable(NODE *p)
 /*
  * Return 1 if a variable of type type is OK to put in register.
  */
-int
-cisreg(TWORD t)
-{
+int cisreg(TWORD t) {
+
 	return 1;
 }
 
@@ -360,9 +447,7 @@ cisreg(TWORD t)
  * is the multiply count for off, t is a storeable node where to write
  * the allocated address.
  */
-void
-spalloc(NODE *t, NODE *p, OFFSZ off)
-{
+void spalloc(NODE *t, NODE *p, OFFSZ off) {
 	NODE *sp;
 
 	p = buildtree(MUL, p, bcon(off/SZCHAR));
@@ -393,9 +478,7 @@ spalloc(NODE *t, NODE *p, OFFSZ off)
  * off is bit offset from the beginning of the aggregate
  * fsz is the number of bits this is referring to
  */
-int
-ninval(CONSZ off, int fsz, NODE *p)
-{
+int ninval(CONSZ off, int fsz, NODE *p) {
 	union { float f; double d; long double l; int i[3]; } u;
 
 	switch (p->n_type) {
@@ -411,9 +494,7 @@ ninval(CONSZ off, int fsz, NODE *p)
 }
 
 /* make a name look like an external name in the local machine */
-char *
-exname(char *p)
-{
+char * exname(char *p) {
 	return (p == NULL ? "" : p);
 }
 

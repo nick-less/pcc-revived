@@ -1,205 +1,176 @@
+/*	$Id: macdefs.h,v 1.8 2017/02/16 18:55:31 ragge Exp $	*/
 /*
- * Copyright (c) 2011 Janne Johansson <jj@openbsd.org>
+ * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
+ * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
  * Machine-dependent defines for both passes.
  */
-
-
+#define w65_wdc 1
 /*
  * Convert (multi-)character constant to integer.
  */
-#define makecc(val,i)  lastcon = i ? (val<<8)|lastcon : val
+#define makecc(val,i)	lastcon = val;
 
-#define ARGINIT		64	/* # bits above fp where arguments start */
+#define ARGINIT     16      /* # bits above fp where arguments start */
 #define AUTOINIT	0	/* # bits below fp where automatics start */
 
 /*
  * Storage space requirements
  */
-#define SZCHAR		8
-#define SZBOOL		8
-#define SZSHORT		16
-#define SZINT		16
-#define SZLONG		32
-#define SZPOINT(t)	24
-#define SZLONGLONG	64
-#define SZFLOAT		32
-#define SZDOUBLE	64
-#define SZLDOUBLE	128
+#define SZCHAR         8
+#define SZBOOL         8
+#define SZSHORT        16
+#define SZINT          16
+#define SZLONG         32
+#define SZLONGLONG     64
+#define SZFLOAT        32
+#define SZDOUBLE       64
+#define SZLDOUBLE      128
+#define SZPOINT(t)     32
 
 /*
  * Alignment constraints
  */
-#define ALCHAR		8
-#define ALBOOL		8
-#define ALSHORT		16
-#define ALINT		16
-#define ALLONG		32
-#define ALPOINT		32
-#define ALLONGLONG	64
-#define ALFLOAT		32
-#define ALDOUBLE	64
-#define ALLDOUBLE	32	/* ???? */
-/* #undef ALSTRUCT	m68k struct alignment is member defined */
-#define ALSTACK		32
-#define ALMAX		64 
+#define ALCHAR         8
+#define ALBOOL         8
+#define ALSHORT        16
+#define ALINT          16
+#define ALLONG         32
+#define ALPOINT        32
+#define ALLONGLONG     64
+#define ALFLOAT        32
+#define ALDOUBLE       64
+#define ALLDOUBLE      64      /* ???? */
+/* #undef ALSTRUCT     m68k struct alignment is member defined */
+#define ALSTACK        32
+#define ALMAX          64 
 
 /*
  * Min/max values.
  */
-#define MIN_CHAR	-128
-#define MAX_CHAR	127
-#define MAX_UCHAR	255
-#define MIN_SHORT	-32768
-#define MAX_SHORT	32767
-#define MAX_USHORT	65535
-#define MIN_INT		MIN_SHORT
-#define MAX_INT		MAX_SHORT
-#define MAX_UNSIGNED	MAX_USHORT
-#define MIN_LONG	(-0x7fffffff-1)
-#define MAX_LONG	0x7fffffff
-#define MAX_ULONG	0xffffffffU
-#define MIN_LONGLONG	0x8000000000000000LL
-#define MAX_LONGLONG	0x7fffffffffffffffLL
-#define MAX_ULONGLONG	0xffffffffffffffffULL
+#define MIN_CHAR       -128
+#define MAX_CHAR       127
+#define MAX_UCHAR      255
+#define MIN_SHORT      -32768
+#define MAX_SHORT      32767
+#define MAX_USHORT     65535
+#define MIN_INT        MIN_SHORT
+#define MAX_INT        MAX_SHORT
+#define MAX_UNSIGNED   MAX_USHORT
+#define MIN_LONG       (-0x7fffffff-1)
+#define MAX_LONG       0x7fffffff
+#define MAX_ULONG      0xffffffffU
+#define MIN_LONGLONG   0x8000000000000000LL
+#define MAX_LONGLONG   0x7fffffffffffffffLL
+#define MAX_ULONGLONG  0xffffffffffffffffULL
 
 /* Default char is signed */
-#undef	CHAR_UNSIGNED
-#define BOOL_TYPE	UCHAR	/* what used to store _Bool */
-
+#undef CHAR_UNSIGNED
+#define BOOL_TYPE      UCHAR   /* what used to store _Bool */
 /*
  * Use large-enough types.
  */
-typedef long long CONSZ;
-typedef unsigned long long U_CONSZ;
+typedef	long long CONSZ;
+typedef	unsigned long long U_CONSZ;
 typedef long long OFFSZ;
 
-#define CONFMT	"%lld"		/* format for printing constants */
+#define CONFMT	"%llo"		/* format for printing constants */
 #define LABFMT	"L%d"		/* format for printing labels */
-#define STABLBL "LL%d"		/* format for stab (debugging) labels */
-#ifdef LANG_F77
-#define BLANKCOMMON "_BLNK_"
-#define MSKIREG	 (M(TYSHORT)|M(TYLONG))
-#define TYIREG TYLONG
-#define FSZLENG	 FSZLONG
-#define ARGREG	AX
-#define ARGOFFSET 8
-#endif
 
-#define BACKAUTO		/* stack grows negatively for automatics */
-#define BACKTEMP		/* stack grows negatively for temporaries */
+#define BACKAUTO 		/* stack grows negatively for automatics */
+#define BACKTEMP 		/* stack grows negatively for temporaries */
 
 #undef	FIELDOPS		/* no bit-field instructions */
-#define TARGET_ENDIAN TARGET_BE /* big-endian */
+#define TARGET_ENDIAN TARGET_LE
 
-#define MYDOTFILE
+#define FINDMOPS	/* to find isz */
+#define	CC_DIV_0	/* division by zero is safe in the compiler */
+#define BYTEOFF(x)	((x)&01)
+#define	WORD_ADDRESSED
 
-#undef FINDMOPS /* XXX FIXME */
-
-#define CC_DIV_0	/* division by zero is safe in the compiler */
-
-/* Definitions mostly used in pass2 */
-
-#define BYTEOFF(x)	((x)&03)
-#define wdal(k)		(BYTEOFF(k)==0)
-
-#define STOARG(p)
-#define STOFARG(p)
-#define STOSTARG(p)
-#define genfcall(a,b)	gencall(a,b)
-
-/* How many integer registers are needed? (used for stack allocation) */
-#define szty(t) ((t) == LDOUBLE ? 3 : \
-	(t) == DOUBLE || DEUNSIGN(t) == LONGLONG ? 2 : 1)
+#define	szty(t)	(((t) == DOUBLE || (t) == FLOAT || \
+	(t) == LONGLONG || (t) == ULONGLONG) ? 2 : (t) == LDOUBLE ? 3 : 1)
 
 /*
- * All registers are given a sequential number to
- * identify it which must match rnames[] in local2.c.
- *
- * The classes used on w65 are:
- *  A - 16-bit  registers (A, X, Y)
- *  B - zero page 
+ * pdp7 has only one register.
+ * We emulate 7 memory positions to make the compiler happier.
  */
+#define	AC	000	/* Scratch and return register */
+#define	POS1	001
+#define	POS2	002
+#define	POS3	003
+#define	POS4	004
+#define	POS5	005
+#define	POS6	006
+#define	POS7	007
 
-#define AX 0
-#define XX 1
-#define YX 2
+#define	FP	010
+#define	SP	011
 
-#define ZP1L 3
-#define ZP2L 4
-#define ZP3L 5
-#define ZP4L 6
+#define	MAXREGS	012
 
-#define DP 7
-#define SP 8
+#define	RSTATUS	SAREG|TEMPREG, SBREG|TEMPREG, SBREG|TEMPREG, SBREG|TEMPREG, \
+		SBREG|TEMPREG, SBREG|TEMPREG, SBREG|PERMREG, SBREG|PERMREG, \
+		0, 0
 
-
-#define MAXREGS 7	/* 7 registers */
-
-#define RSTATUS \
-	SAREG|TEMPREG, SAREG|TEMPREG, SAREG|TEMPREG, \
-	SBREG|TEMPREG, SBREG|TEMPREG, SBREG|TEMPREG, SBREG|TEMPREG, \
-	 0, 0, /* dp and sp are ignored here */ 
+#define	ROVERLAP { -1 }, { -1 }, { -1 }, { -1 }, { -1 }, { -1 }, { -1 }, \
+		{ -1 }, { -1 }, { -1 },
 
 
-/* no overlapping registers at all */
-#define ROVERLAP \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, \
-	{ -1}, 
+/* Return a register class based on the type of the node */
+// #define PCLASS(p) (((p->n_op == REG) || (p->n_op == TEMP)) && regno(p) > 7 ? 0 : \
+// 	(((p->n_op == REG) || (p->n_op == TEMP)) && regno(p)) ? SBREG : SAREG)
 
+//#define PCLASS(p) (p->n_op == REG && regno(p) > 7 ? 0 : \
+//	(p->n_op == REG && regno(p)) ? SBREG : SAREG)
 
 /* Return a register class based on the type of the node */
 #define PCLASS(p) (p->n_type > SHORT ? SBREG : SAREG)
 
-#define NUMCLASS	2	/* highest number of reg classes used */
+
+#define	NUMCLASS 	2	/* highest number of reg classes used */
 
 int COLORMAP(int c, int *r);
-#define GCLASS(x) (x < 8 ? CLASSA : x < 16 ? CLASSB : x < 23 ? CLASSC : CLASSD)
+#define	GCLASS(x)	((x) == 0 ? CLASSA : CLASSB)
 #define DECRA(x,y)	(((x) >> (y*6)) & 63)	/* decode encoded regs */
-#define ENCRD(x)	(x)		/* Encode dest reg in n_reg */
-#define ENCRA1(x)	((x) << 12)	/* A1 */
-#define ENCRA2(x)	((x) << 18)	/* A2 */
+#define	ENCRD(x)	(x)		/* Encode dest reg in n_reg */
+#define ENCRA1(x)	((x) << 6)	/* A1 */
+#define ENCRA2(x)	((x) << 12)	/* A2 */
 #define ENCRA(x,y)	((x) << (6+y*6))	/* encode regs in int */
+#define	RETREG(x)	AC
 
-#define RETREG(x)	((x) == FLOAT || (x) == DOUBLE || (x) == LDOUBLE ? ZP2L : \
-	(x) == LONGLONG || (x) == ULONGLONG ? ZP2L : (x) > BTMASK ? ZP1L : AX)
-
-#define FPREG	ZP4L	/* frame pointer */
+/* XXX - to die */
+#define FPREG	FP	/* frame pointer */
 #define STKREG	SP	/* stack pointer */
 
-#define HAVE_WEAKREF
-#define TARGET_FLT_EVAL_METHOD	2	/* all as long double */
+#define	SLDFPSP		(MAXSPECIAL+1)	/* load fp or sp */
 
-/*
- * Extended assembler macros.
- */
-int targarg(char *w, void *arg);
-#define XASM_TARGARG(w, ary) (w[1] == 'b' ? w++, 0 : targarg(w, ary))
 
 /* floating point definitions */
-#define USE_IEEEFP_32
-#define FLT_PREFIX	IEEEFP_32
-#define USE_IEEEFP_64
-#define DBL_PREFIX	IEEEFP_64
-#define LDBL_PREFIX	IEEEFP_64
 
+#define	FDFLOAT
+#define	DEFAULT_FPI_DEFS { &fpi_ffloat, &fpi_dfloat, &fpi_dfloat }

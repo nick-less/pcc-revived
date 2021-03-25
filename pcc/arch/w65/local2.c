@@ -31,10 +31,19 @@
 static int stkpos;
 static int regm, regf, fpsub, nfp;
 
+// char *rnames[] = {
+// 	"a", "x", "y", "ds1", "ds2", "ds3", "ds4", "ds5", "ds6", "ds7", "ds8", "dm1", "dm2", "dm3", "dm4", "dl1", "dl2"
+// };
+char *rnames[] = {
+	"AC", "POS1", "POS1", "POS1", "POS1", "POS1", "POS1", "POS1", 
+	"FP", "SP",
+};
 /**
  * ca65 has no .file directive so overwrite  printdotfile to disable ".file"
  */
 void printdotfile(char *file) {
+	printf("; %s\n", file);
+
 }
 
 void deflab(int label) {
@@ -55,11 +64,12 @@ void prologue(struct interpass_prolog *ipp) {
 	regm = regf = nfp = 0;
 	fpsub += 4;
 
+
 //	printf(";	link.%c %%fp,#%d;;prologue\n", fpsub > 32768 ? 'l' : 'w', -fpsub);
-	printf("	lda zp4l	; load old fp\n");
+	printf("	lda ds1	; load old fp\n");
 	printf("	pha	; save old fp\n");
 	printf("	tsx ; get stackptr\n");
-	printf("	stx zp4l ;store to fp\n");
+	printf("	stx ds1 ;store to fp\n");
 }
 
 void eoftn(struct interpass_prolog *ipp) {
@@ -68,10 +78,10 @@ void eoftn(struct interpass_prolog *ipp) {
 		return; /* no code needs to be generated */
 
 //	printf(";	unlk %% ;;interpass_prolog\n");
-	printf("	ldx	zp4l	;load fp\n");
+	printf("	ldx	ds1	;load fp\n");
 	printf("	tsx		;stack is now like after\n");
 	printf("	plx		;get old fp\n");
-	printf("	stx zp4l ;store to fp\n");
+	printf("	stx ds1 ;store to fp\n");
 	printf("	rts\n");
 	printf(".endproc\n\n");
 }
@@ -142,11 +152,14 @@ int tlen(NODE *p) {
 
 /**
  * fieldexpand
- * 
+ * Field ops are found in the table (S, H, M or N), and
+		this function may alter the default behaviour of printing
+		out the values.  Return 1 if handled.
  * 
  */
 int fldexpand(NODE *p, int cookie, char **cp) {
-	comperr("fldexpand %p %d %s");
+	// comperr("fldexpand %p %d %s");
+
 	return 0;
 }
 
@@ -194,25 +207,36 @@ static void starg(NODE *p) {
 void zzzcode(NODE *p, int c) {
 	TWORD t = p->n_type;
 	char *s;
-	NODE *r ;
+	NODE *r,*l;
 	unsigned short int ival;
 
 	switch (c) {
 	case 'I': // indexed access;
-		r = getlr( p, 'L' );
+		l = getlr( p, 'L' );
+		r = getlr( p, 'R' );
+		if (getlval(l)) {
+			ival = getlval(l);
+			printf("ldx #$%x ; l",  ival);
+		}
 		if (getlval(r)) {
 			ival = getlval(r);
-			printf("ldx #$%x",  ival);
+			printf("ldx #$%x ; r",  ival);
 		}
+//		fwalk(p, e2print, 0);
 		break;
+	case 'J': // indexed access;
+		fwalk(p, e2print, 0);
+	break;
 	case 'R': // output based on register
+		r = getlr( p, 'L');
+		printf("%s", r->n_rval==0?"p":rnames[r->n_rval]);
 		break;
 	case 'L':
 		t = p->n_left->n_type;
 		/* FALLTHROUGH */
 	case 'A':
 		s = (t == CHAR || t == UCHAR ? "b" :
-		    t == SHORT || t == USHORT ? "w" : 
+		    t == SHORT || t == USHORT || t == INT ? "w" : 
 		    t == FLOAT ? "s" :
 		    t == DOUBLE ? "d" :
 		    t == LDOUBLE ? "x" : "l");
@@ -245,37 +269,28 @@ void zzzcode(NODE *p, int c) {
 	case 'Q': /* struct assign */
 		printf("	move.l %d,-(%%sp)\n", 
 		    attr_find(p->n_ap, ATTR_P2STRUCT)->iarg(0));
-		expand(p, INAREG, "	move.l AR,-(%sp)\n");
-		expand(p, INAREG, "	move.l AL,-(%sp)\n");
+//		expand(p, INAREG, "	move.l AR,-(%sp)\n");
+//		expand(p, INAREG, "	move.l AL,-(%sp)\n");
 		printf("	jsr memcpy\n");
 		printf("	add.l #12,%%sp ;\n");
 		break;
 
 	case 'S': /* struct arg */
-		starg(p);
+
+		printf("macro truct arg");
+//		starg(p);
 		break;
 
 	case '2':
-		if (regno(getlr(p, '2')) != regno(getlr(p, 'L')))
-			expand(p, INAREG, "	fmove.x AL,A2\n");
+		printf("macro 2");
+//		if (regno(getlr(p, '2')) != regno(getlr(p, 'L')))
+//			expand(p, INAREG, "	fmove.x AL,A2\n");
 		break;
 
 	default:
 		comperr("zzzcode %c", c);
 	}
 }
-
-#if 0
-int canaddr(NODE *);
-int canaddr(NODE *p) {
-	int o = p->n_op;
-
-	if (o==NAME || o==REG || o==ICON || o==OREG ||
-	    (o==UMUL && shumul(p->n_left, SOREG)))
-		return(1);
-	return(0);
-}
-#endif
 
 /*
  * Does the bitfield shape match?
@@ -288,41 +303,20 @@ int flshape(NODE *p) {
 /* INTEMP shapes must not contain any temporary registers */
 /* XXX should this go away now? */
 int shtemp(NODE *p) {
+	fprintf(stderr, "shtemp %p\n",p);
 	return 0;
-#if 0
-	int r;
-
-	if (p->n_op == STARG )
-		p = p->n_left;
-
-	switch (p->n_op) {
-	case REG:
-		return (!istreg(p->n_rval));
-
-	case OREG:
-		r = p->n_rval;
-		if (R2TEST(r)) {
-			if (istreg(R2UPK1(r)))
-				return(0);
-			r = R2UPK2(r);
-		}
-		return (!istreg(r));
-
-	case UMUL:
-		p = p->n_left;
-		return (p->n_op != UMUL && shtemp(p));
-	}
-
-	if (optype(p->n_op) != LTYPE)
-		return(0);
-	return(1);
-#endif
 }
 
+/**
+ * Print out constants for M or N bitfield modifier.
+ */
 void adrcon(CONSZ val) {
 	printf("#" CONFMT, val);
 }
 
+/**
+ * Print out constant for C table directive.
+ */
 void conput(FILE *fp, NODE *p) {
 	long val = getlval(p);
 
@@ -335,7 +329,7 @@ void conput(FILE *fp, NODE *p) {
 	case ICON:
 		fprintf(fp, "%ld", val);
 		if (p->n_name[0])
-			printf("+%s", p->n_name);
+			fprintf(fp, "+%s", p->n_name);
 		break;
 
 	default:
@@ -353,6 +347,7 @@ void insput(NODE *p) {
  * reference, or the next memory location.
  */
 void upput(NODE *p, int size) {
+	printf("uput");
 	switch (p->n_op) {
 	case REG:
 		printf("%%%s", &rnames[p->n_rval][2]);
@@ -378,7 +373,7 @@ void upput(NODE *p, int size) {
  */
 void adrput(FILE *io, NODE *p) {
 	int r;
-
+fprintf(stderr,"adrput %p, $d\n",p, p->n_op);
 	/* output an address, with offsets, from p */
 	switch (p->n_op) {
 	case NAME:
@@ -387,13 +382,15 @@ void adrput(FILE *io, NODE *p) {
 		// 	fprintf(io, CONFMT "%s", getlval(p),
 		// 	    *p->n_name ? "+" : "");
 		if (p->n_name[0]) {
-			printf("%s", p->n_name);
+			fprintf(io, "%s", p->n_name);
 		} else {
 			comperr("adrput");
 		}
 		return;
 
 	case OREG:
+	case UMUL: // FIXME we dident turn into oreg so we end up with umul here
+
 		r = p->n_rval;
 		// this is the place where variables on the stack a accesses
 
@@ -402,8 +399,14 @@ void adrput(FILE *io, NODE *p) {
 		// 	fprintf(io, CONFMT "%s", getlval(p),
 		// 	    *p->n_name ? "+" : "");
 		// }
+
+		fprintf(io, "%d,S",p->n_rval);
+
+		return ;
+		fprintf(io, "||| %d ||| ",p->n_rval);
+
 		if (p->n_name[0]) {
-			printf("%s", p->n_name);
+			fprintf(io,"%s", p->n_name);
 		}
 		if (R2TEST(r)) {
 			int r1 = R2UPK1(r);
@@ -446,9 +449,10 @@ void adrput(FILE *io, NODE *p) {
 			fprintf(io, "%s", rnames[p->n_rval]);
 		}
 		return;
-
+		
 	default:
-		comperr("illegal address, op %d, node %p", p->n_op, p);
+	fprintf(io,"illegal address, op %d, node %p", p->n_op, p);
+//		comperr("illegal address, op %d, node %p", p->n_op, p);
 		return;
 
 	}
@@ -456,15 +460,15 @@ void adrput(FILE *io, NODE *p) {
 
 static char *
 ccbranches[] = {
-	"jeq",		/* jumpe */
-	"jne",		/* jumpn */
-	"jle",		/* jumple */
+	"beq",		/* jumpe */
+	"bne",		/* jumpn */
+	"beq",		/* jumple */
 	"jlt",		/* jumpl */
-	"jge",		/* jumpge */
+	"beq",		/* jumpge */
 	"jgt",		/* jumpg */
-	"jls",		/* jumple (jlequ) */
+	"beq",		/* jumple (jlequ) */
 	"jcs",		/* jumpl (jlssu) */
-	"jcc",		/* jumpge (jgequ) */
+	"beq",		/* jumpge (jgequ) */
 	"jhi",		/* jumpg (jgtru) */
 };
 
@@ -583,6 +587,11 @@ static void fixcalls(NODE *p, void *arg) {
 	}
 }
 
+/**
+  * Directly when the whole list of trees for a function is
+  * read into pass2 the list is given myreader() to let the
+  * target do something with it
+  */
 void myreader(struct interpass *ipole) {
 	struct interpass *ip;
 
@@ -624,13 +633,46 @@ static void pconv2(NODE *p, void *arg) {
 	}
 }
 
-void mycanon(NODE *p) {
-	walkf(p, pconv2, 0);
+/**
+ * the optimizer spits out a lot of TEMP node, these should be REGS I think
+ */
+static void tempconv(NODE *p, void *arg) {
+	if (p->n_op == TEMP) {
+		printf("TEMP---\n");
+
+		// p->n_op = REG;
+	}
 }
 
+/**
+ * Called from canon() to do target-specific stuff with
+ * the tree p.
+ */
+void mycanon(NODE *p) {
+	// walkf(p, pconv2, 0);
+
+//printf("---\n");
+//		fwalk(p, e2print, 0);
+//printf("---\n");//
+//	 walkf(p, tempconv, 0);
+//		fwalk(p, e2print, 0);
+//printf("---\n");
+
+
+
+}
+
+/**
+  * Called from optimize() with the linked list to do
+  * target-dependent optimizations.
+  */
 void myoptim(struct interpass *ip) {
 }
 
+/**
+ * Print out a move instruction from register s to d, 
+ * carrying data of type t.
+ */ 
 void rmove(int s, int d, TWORD t) {
 
 	if (t >= FLOAT && t <= TDOUBLE)
@@ -644,10 +686,25 @@ void rmove(int s, int d, TWORD t) {
  * registers in the array r[] indexed by class.
  */
 int COLORMAP(int cc, int *r) {
-	int a,c;
+	int a,c,i;
 
 	a = r[CLASSA];
-	c = r[CLASSC];
+	c = r[CLASSB];
+
+	fprintf(stderr, "colormap: %d %d %d %d \n", CLASSA, CLASSB, CLASSC, CLASSD);
+
+
+	for (i=0;i<MAXREGS;i++) {
+		fprintf(stderr, "%d ", r[i]);
+	}
+		fprintf(stderr, "\n");
+
+	fprintf(stderr, "colormap: %d %d %d \n", cc, a, c);
+
+	if (cc == CLASSA) {
+		return r[CLASSA] == 0;
+	}
+	return r[CLASSB] < 7;
 
 	switch (cc) {
 	case CLASSA:
@@ -655,25 +712,12 @@ int COLORMAP(int cc, int *r) {
 			return 1;
 		break;
 	case CLASSB:
-		return r[CLASSB] < 6;
-	case CLASSC:
-		if (c > 2)
-			return 0;
-		if (c == 2 && a > 0)
-			return 0;
-		if (c == 1 && a > 1)
-			return 0;
-		if (c == 0 && a > 3)
-			return 0;
-		return 1;
+		return r[CLASSB] < 4;
 	}
 	return 0;
 }
 
-char *rnames[] = {
-	"a", "x", "y", "zpl1", "zp2l", "zp3l", "zp4l", "b",
-	"s",  
-};
+
 
 /*
  * Return a class suitable for a specific type.
@@ -727,6 +771,7 @@ void lastcall(NODE *p) {
  * Special shapes.
  */
 int special(NODE *p, int shape) {
+	fprintf(stderr, "special %s", prcook(shape));
 	return SRNOPE;
 }
 
