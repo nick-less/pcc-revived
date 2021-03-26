@@ -13,13 +13,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - run: cd pcc
     - name: configure
-      run: ./configure --prefix=$(pwd)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
-    - name: make
-      run: make
+      run: ./pcc/configure --prefix=$(pwd)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
+    - name: make 
+      run: make -f pcc/Makefile
     - name: make install
-      run: make install
+      run: make -f pcc/Makefile install
     - name: tar
       run: tar -czf pcc.tgz $(pwd)/build
     - uses: "marvinpinto/action-automatic-releases@latest"
