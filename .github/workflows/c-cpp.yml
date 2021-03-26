@@ -19,14 +19,14 @@ jobs:
       run: make -f Makefile all
     - name: make install
       run: make -f Makefile install
-    - name: tar
-      run: tar -czf pcc.tgz $(pwd)/build
-    - uses: "marvinpinto/action-automatic-releases@latest"
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "latest"
-        prerelease: true
-        title: "Development Build"
-        files: |
-          pcc.tgz
+#    - name: tar
+#      run: tar -czf pcc.tgz $(pwd)/build
+#    - uses: "marvinpinto/action-automatic-releases@latest"
+#      with:
+#        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+#        automatic_release_tag: "latest"
+#        prerelease: true
+#        title: "Development Build"
+#        files: |
+#          pcc.tgz
 
