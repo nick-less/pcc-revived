@@ -16,7 +16,7 @@ jobs:
     - name: configure
       run: ./pcc/configure --prefix=$(pwd)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
     - name: make 
-      run: make -f pcc/Makefile
+      run: make -f pcc/Makefile all
     - name: make install
       run: make -f pcc/Makefile install
     - name: tar
