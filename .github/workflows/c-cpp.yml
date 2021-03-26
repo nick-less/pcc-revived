@@ -14,13 +14,13 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: configure
-      run: ./configure --prefix=$(PWD)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
+      run: ./configure --prefix=$(pwd)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
     - name: make
       run: make
     - name: make install
       run: make install
     - name: tar
-      run: tar -czf pcc.tgz $(PWD)/build
+      run: tar -czf pcc.tgz $(pwd)/build
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
