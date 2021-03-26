@@ -13,6 +13,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      run: cd pcc
     - name: configure
       run: ./configure --prefix=$(pwd)/build --target=w65816 --with-assembler=/usr/local/bin/ca65 --with-linker=/usr/local/bin/ld65
     - name: make
