@@ -113,7 +113,6 @@ void bfcode(struct symtab **sp, int cnt) {
 	int i, l;
 
 	int argstacksize;
-	return;
 
 #ifdef GCC_COMPAT
 	struct attr *ap;
@@ -168,13 +167,13 @@ void bfcode(struct symtab **sp, int cnt) {
 	 * At the same time recalculate their arg offset on stack.
 	 * We also get the "pop size" for stdcall.
 	 */
-//	printf("bfcode\n");
+	printf("bfcode\n");
 	for (i = 0; i < cnt; i++) {
 		sp2 = sp[i];
 		sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
 
 		SETOFF(sz, SZINT);
-//printf(" i: %d", i);
+printf(" i: %d", i);
 	//	if (cisreg(sp2->stype) == 0 ||
 //		    ((regparmarg - nrarg) * SZINT < sz)) {	/* not in reg */
 			sp2->soffset = argbase;
@@ -186,7 +185,7 @@ void bfcode(struct symtab **sp, int cnt) {
 	//		sp2->sclass = REGISTER;
 	//	}
 	}
-//	printf("\n");
+	printf("\n");
 
 	/*
 	 * Now (argbase - ARGINIT) is used space on stack.

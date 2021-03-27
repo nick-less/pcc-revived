@@ -87,7 +87,7 @@ struct optab table[] = {
 	SAREG|SNAME|SOREG,	TAREG,
 	SAREG|SNAME|SOREG,	TAREG,
 		0,	RDEST,
-		"	sta.ZA AR ;0\n", },
+		"	sta.ZA AL ;0\n", },
 
 { ASSIGN,	FOREFF,
 	SBREG|SNAME|SOREG,	TPOINT,
@@ -195,18 +195,19 @@ struct optab table[] = {
 
 /******/
 
-{ PLUS,		INAREG,
+
+{ PLUS,		INAREG|FOREFF,
 	SAREG,	TCHAR|TUCHAR|TWORD|TPOINT,
 	SAREG|SNAME|SOREG|SCON,	TCHAR|TUCHAR|TWORD|TPOINT,
 		0,	RLEFT,
-		"	adc AR ; \n", },
+		"	ZE\n", },
 
 
 { MINUS,	INAREG|FOREFF,
 	SAREG,  TWORD|TPOINT,
 	SAREG|SNAME|SOREG|SCON,	TCHAR|TUCHAR|TWORD|TPOINT,
 	      0,      RLEFT,
-		"	sbc AR ; \n", },
+		"	ZE\n", },
 
 /*
  * Logical/branching operators

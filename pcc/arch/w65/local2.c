@@ -219,7 +219,7 @@ void zzzcode(NODE *p, int c) {
 			}
 		if (pr) {
 			if (pr == 2) {
-				printf("	ply\n ply\n");
+				printf("	ply\n	ply\n");
 			} else {
 				printf("	tsc\n");
 				printf("	sec\n");
@@ -230,7 +230,15 @@ void zzzcode(NODE *p, int c) {
 			}	
 		}
 		break;
-
+	case 'E':	/*  PLUS/MINUS */
+		if (getlval(p->n_right) == 1)
+			{
+			printf("%s", (p->n_op == PLUS ? "inc" : "dec") );
+			return;
+			}
+		printf("%s ", (p->n_op == PLUS ? "adc" : "sbc") );
+		adrput(stdout, p->n_right);
+		return;
 	case 'I': // indexed access;
 		l = getlr( p, 'L' );
 		r = getlr( p, 'R' );
@@ -268,8 +276,6 @@ void zzzcode(NODE *p, int c) {
 		if (p->n_qual)
 			printf("	add.l #%d,%%sp ; (ZB)\n", (int)p->n_qual);
 		break;
-
-
 	case 'F': /* Emit float branches */
 		switch (p->n_op) {
 		case GT: s = "fjnle"; break;
