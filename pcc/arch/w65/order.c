@@ -144,8 +144,8 @@ int setbin(NODE *p) {
 
 /* setup for assignment operator */
 int setasg(NODE *p, int cookie) {
-fprintf(stderr, "setasg %p, %s\n", p, prcook(cookie));
-		fwalk(p, e2print, 0);
+fprintf(stderr, "setasg %p, %s\n", p,  prcook(cookie));
+//		fwalk(p, e2print, 0);
 
 	if (x2debug)
 		printf("setasg(%p)\n", p);

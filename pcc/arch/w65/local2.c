@@ -66,10 +66,6 @@ void prologue(struct interpass_prolog *ipp) {
 
 
 //	printf(";	link.%c %%fp,#%d;;prologue\n", fpsub > 32768 ? 'l' : 'w', -fpsub);
-	printf("	lda ds1	; load old fp\n");
-	printf("	pha	; save old fp\n");
-	printf("	tsx ; get stackptr\n");
-	printf("	stx ds1 ;store to fp\n");
 }
 
 void eoftn(struct interpass_prolog *ipp) {
@@ -78,12 +74,8 @@ void eoftn(struct interpass_prolog *ipp) {
 		return; /* no code needs to be generated */
 
 //	printf(";	unlk %% ;;interpass_prolog\n");
-	printf("	ldx	ds1	;load fp\n");
-	printf("	tsx		;stack is now like after\n");
-	printf("	plx		;get old fp\n");
-	printf("	stx ds1 ;store to fp\n");
 	printf("	rts\n");
-	printf(".endproc\n\n");
+//	printf(".endproc\n\n");
 }
 
 /*
@@ -208,9 +200,37 @@ void zzzcode(NODE *p, int c) {
 	TWORD t = p->n_type;
 	char *s;
 	NODE *r,*l;
-	unsigned short int ival;
+	unsigned short int ival, pr;
 
 	switch (c) {
+
+	case 'C':  /* remove from stack after subroutine call */
+#ifdef notdef
+		if (p->n_left->n_flags & FSTDCALL)
+			break;
+#endif
+        // XXX n_qual seems to assume LONG
+		pr = p->n_qual / 2;
+//		printf("; call flags %x\n", p->n_left->n_flags);
+//		if (attr_find(p->n_ap, ATTR_I86_FPPOP))
+//			printf("	fstp	st(0)\n");
+		if (p->n_op == UCALL) {
+			return; /* XXX remove ZC from UCALL */
+			}
+		if (pr) {
+			if (pr == 2) {
+				printf("	ply\n ply\n");
+			} else {
+				printf("	tsc\n");
+				printf("	sec\n");
+				printf("	sbc #%d\n", pr);
+				printf("	tcs\n");
+				//
+//				printf("	add sp,#%d\n", pr);
+			}	
+		}
+		break;
+
 	case 'I': // indexed access;
 		l = getlr( p, 'L' );
 		r = getlr( p, 'R' );
@@ -225,7 +245,8 @@ void zzzcode(NODE *p, int c) {
 //		fwalk(p, e2print, 0);
 		break;
 	case 'J': // indexed access;
-		fwalk(p, e2print, 0);
+	printf(";indexed access");
+//		fwalk(p, e2print, 0);
 	break;
 	case 'R': // output based on register
 		r = getlr( p, 'L');
@@ -327,9 +348,11 @@ void conput(FILE *fp, NODE *p) {
 
 	switch (p->n_op) {
 	case ICON:
+		if (p->n_name[0]) {
+			fprintf(fp, "%s", p->n_name);
+		} else {
 		fprintf(fp, "%ld", val);
-		if (p->n_name[0])
-			fprintf(fp, "+%s", p->n_name);
+		}
 		break;
 
 	default:
@@ -638,9 +661,9 @@ static void pconv2(NODE *p, void *arg) {
  */
 static void tempconv(NODE *p, void *arg) {
 	if (p->n_op == TEMP) {
-		printf("TEMP---\n");
+		fprintf(stderr, "TEMP---\n");
 
-		// p->n_op = REG;
+		p->n_op = REG;
 	}
 }
 
@@ -649,17 +672,9 @@ static void tempconv(NODE *p, void *arg) {
  * the tree p.
  */
 void mycanon(NODE *p) {
-	// walkf(p, pconv2, 0);
-
-//printf("---\n");
-//		fwalk(p, e2print, 0);
-//printf("---\n");//
+	 walkf(p, pconv2, 0);
+// XXX used to turn temp into REG nodes..
 //	 walkf(p, tempconv, 0);
-//		fwalk(p, e2print, 0);
-//printf("---\n");
-
-
-
 }
 
 /**
@@ -667,6 +682,7 @@ void mycanon(NODE *p) {
   * target-dependent optimizations.
   */
 void myoptim(struct interpass *ip) {
+	 //walkf(p, eprint, 0);
 }
 
 /**

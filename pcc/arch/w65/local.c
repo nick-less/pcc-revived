@@ -379,9 +379,7 @@ return p;
 
 void myp2tree(NODE *p) {
 
-fprintf(stderr, "myp2tree %d\n",__LINE__);
-	fwalk(p, eprint, 0);
-fprintf(stderr,"myp2tree %d\n",__LINE__);
+	fprintf(stderr, "myp2free %p\n",p);
 
 	struct symtab *sp;
 	NODE *l;
@@ -448,27 +446,23 @@ int cisreg(TWORD t) {
  * the allocated address.
  */
 void spalloc(NODE *t, NODE *p, OFFSZ off) {
-	NODE *sp;
+	P1ND *sp;
 
-	p = buildtree(MUL, p, bcon(off/SZCHAR));
-	p = buildtree(PLUS, p, bcon(30));
-	p = buildtree(AND, p, xbcon(-16, NULL, UNSIGNED));
-	p = cast(p, UNSIGNED, 0);
+printf("; spalloc %p\n", p);
+	p = buildtree(MUL, p, bcon(off/SZCHAR)); /* XXX word alignment? */
 
 	/* sub the size from sp */
-	sp = block(REG, NIL, NIL, UNSIGNED+PTR, 0, 0);
+	sp = block(REG, NIL, NIL, p->n_type, 0, 0);
 	slval(sp, 0);
 	sp->n_rval = STKREG;
-	p = (buildtree(MINUSEQ, sp, p));
-	ecomp(p);
+	ecomp(buildtree(MINUSEQ, sp, p));
 
 	/* save the address of sp */
-	sp = block(REG, NIL, NIL, PTR+UNSIGNED, t->n_df, t->n_ap);
+	sp = block(REG, NIL, NIL, PTR+INT, t->n_df, t->n_ap);
 	slval(sp, 0);
 	sp->n_rval = STKREG;
 	t->n_type = sp->n_type;
-	p = (buildtree(ASSIGN, t, sp)); /* Emit! */
-	ecomp(p);
+	ecomp(buildtree(ASSIGN, t, sp)); /* Emit! */
 
 }
 

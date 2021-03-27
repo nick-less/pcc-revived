@@ -64,36 +64,26 @@ void setseg(int seg, char *name) {
 	printf("\t%s\n", name);
 }
 
-static char* mygettype (int size) {
-	switch (size) {
-		case 2:
-		return ".word";
-		case 4:
-		return ".dword";
-	}
-	return ".byte";
-}
+
 /*
  * Define everything needed to print out some data (or text).
  * This means segment, alignment, visibility, etc.
  */
 void defloc(struct symtab *sp) {
 	char *name;
-printf("defloc %s", sp->sname);
+// printf("defloc %s", sp->sname);
 	name = getexname(sp);
 	if (sp->sclass == EXTDEF) {
 		printf("\t.global %s\n", name);
+		/* XXX do we need this?
 		if (ISFTN(sp->stype)) {
 			printf(";\t.type %s,@function\n", name);
-			printf(".proc %s: near\n", name);
+//			printf(".proc %s: near\n", name);
 		} else {
 			printf(";\t.type %s,@object\n", name);
 			printf(";\t.size %s,%d\n", name,
 			    (int)tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR);
-
-//			printf("%s:\t%s\t", name, mygettype(tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR));
-			
-		}
+		}*/
 	}
 	if (sp->slevel == 0)
 		printf("%s:\n", name);
@@ -121,25 +111,147 @@ void bfcode(struct symtab **sp, int cnt) {
 	NODE *p, *p2;
 	char *c;
 	int i, l;
-	printf("bfcode\n");
-return ;
-	/* handcraft isz */
-	l = strlen(cftnsp->sname)+10;
-	c = tmpalloc(l);
-	snprintf(c, l, "	isz %s\n", exname(cftnsp->sname));
 
-	/* Convert param symtab entries to NAMEs */
-	for (i = 0; i < cnt; i++) {
-		sp[i]->sclass = STATIC;
-		sp[i]->soffset = getlab();
-		p2 = cast(buildtree(ADDROF,
-			nametree(cftnsp), 0), INCREF(INCREF(sp[i]->stype)), 0);
-		p = buildtree(ASSIGN, nametree(sp[i]),
-		    buildtree(UMUL, buildtree(UMUL, p2, 0), 0));
-		ecomp(p);
-		send_passt(IP_ASM, c);
-		printf(LABFMT ":	0\n", sp[i]->soffset);
+	int argstacksize;
+	return;
+
+#ifdef GCC_COMPAT
+	struct attr *ap;
+#endif
+	struct symtab *sp2;
+	extern int gotnr;
+	NODE *n ;
+	int regparmarg;
+	int argbase, nrarg, sz;
+	int structrettemp;
+
+	argbase = ARGINIT;
+	nrarg = regparmarg = 0;
+	argstacksize = 0;
+
+#ifdef GCC_COMPAT
+/*
+	regpregs = reparegs;
+        if ((ap = attr_find(cftnsp->sap, GCC_ATYP_REGPARM)))
+                regparmarg = ap->iarg(0);
+        if ((ap = attr_find(cftnsp->sap, GCC_ATYP_FASTCALL)))
+                regparmarg = 2, regpregs = fastregs;
+*/
+#endif
+
+	/* Function returns struct, create return arg node */
+
+	if (cftnsp->stype == STRTY+FTN || cftnsp->stype == UNIONTY+FTN) {
+		sz = (int)tsize(BTYPE(cftnsp->stype), cftnsp->sdf, cftnsp->sap);
+		if (sz != SZLONGLONG ||
+		    attr_find(cftnsp->sap, ATTR_COMPLEX) == 0)
+		{
+//			if (regparmarg) {
+//				n = block(REG, 0, 0, INT, 0, 0);
+//				regno(n) = regpregs[nrarg++];
+//			} else {
+				n = block(OREG, 0, 0, INT, 0, 0);
+				slval(n, argbase/SZCHAR);
+				argbase += SZINT;
+				regno(n) = FPREG;
+				argstacksize += 4; /* popped by callee */
+//			}
+			p = tempnode(0, INT, 0, 0);
+			structrettemp = regno(p);
+			p = buildtree(ASSIGN, p, n);
+			ecomp(p);
+		}
 	}
+
+	/*
+	 * Find where all params are so that they end up at the right place.
+	 * At the same time recalculate their arg offset on stack.
+	 * We also get the "pop size" for stdcall.
+	 */
+//	printf("bfcode\n");
+	for (i = 0; i < cnt; i++) {
+		sp2 = sp[i];
+		sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
+
+		SETOFF(sz, SZINT);
+//printf(" i: %d", i);
+	//	if (cisreg(sp2->stype) == 0 ||
+//		    ((regparmarg - nrarg) * SZINT < sz)) {	/* not in reg */
+			sp2->soffset = argbase;
+			argbase += sz;
+			nrarg = regparmarg;	/* no more in reg either */
+	//	} else {					/* in reg */
+	//		sp2->soffset = regpregs[nrarg];
+	//		nrarg += sz/SZINT;
+	//		sp2->sclass = REGISTER;
+	//	}
+	}
+//	printf("\n");
+
+	/*
+	 * Now (argbase - ARGINIT) is used space on stack.
+	 * Move (if necessary) the args to something new.
+	 */
+	for (i = 0; i < cnt; i++) {
+		int reg, j;
+
+		sp2 = sp[i];
+
+		// XXX register parameters, maybe later ... much later...
+		// if ((ISSOU(sp2->stype) && sp2->sclass == REGISTER) ||
+		//     (sp2->sclass == REGISTER && xtemps == 0)) {
+		// 	/* must move to stack */
+		// 	sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
+		// 	SETOFF(sz, SZINT);
+		// 	SETOFF(autooff, SZINT);
+		// 	reg = sp2->soffset;
+		// 	sp2->sclass = AUTO;
+		// 	sp2->soffset = NOOFFSET;
+		// 	oalloc(sp2, &autooff);
+        //                 for (j = 0; j < sz/SZCHAR; j += 4) {
+        //                         p = block(OREG, 0, 0, INT, 0, 0);
+        //                         slval(p, sp2->soffset/SZCHAR + j);
+        //                         regno(p) = FPREG;
+        //                         n = block(REG, 0, 0, INT, 0, 0);
+        //                         regno(n) = regpregs[reg++];
+        //                         p = block(ASSIGN, p, n, INT, 0, 0);
+        //                         ecomp(p);
+        //                 }
+		// } else 
+		if (cisreg(sp2->stype) && !ISSOU(sp2->stype) &&
+		    ((cqual(sp2->stype, sp2->squal) & VOL) == 0) && xtemps) {
+
+			// XXX not now..
+			/* just put rest in temps */
+			// if (sp2->sclass == REGISTER) {
+			// 	n = block(REG, 0, 0, sp2->stype,
+			// 	    sp2->sdf, sp2->sap);
+			// 	if (ISLONGLONG(sp2->stype))
+			// 		regno(n) = longregs[sp2->soffset];
+			// 	else if (DEUNSIGN(sp2->stype) == CHAR ||
+			// 	    sp2->stype == BOOL)
+			// 		regno(n) = charregs[sp2->soffset];
+			// 	else
+			// 		regno(n) = regpregs[sp2->soffset];
+			// } else {
+                                n = block(OREG, 0, 0, sp2->stype,
+				    sp2->sdf, sp2->sap);
+                                slval(n, sp2->soffset/SZCHAR);
+                                regno(n) = FPREG;
+			//}
+			p = tempnode(0, sp2->stype, sp2->sdf, sp2->sap);
+			sp2->soffset = regno(p);
+			sp2->sflags |= STNODE;
+			n = buildtree(ASSIGN, p, n);
+			ecomp(n);
+		}
+	}
+
+        if (attr_find(cftnsp->sap, GCC_ATYP_STDCALL)) {
+		/* XXX interaction STDCALL and struct return? */
+		argstacksize += (argbase - ARGINIT)/SZCHAR;
+
+        }
 }
 
 
@@ -166,7 +278,7 @@ void bjobcode(void) {
 	printf("	.importzp	zp1l, zp2l, zp3l, zp4l\n");
 
 	/* Set correct names for our types */
-	astypnames[SHORT] = astypnames[USHORT] = "\t.word";
+	astypnames[SHORT] = astypnames[USHORT] = "\t^";
 	astypnames[INT] = astypnames[UNSIGNED] = "\t.word";
 	astypnames[LONG] = astypnames[ULONG] = "\t.dword";
 	astypnames[LONGLONG] = astypnames[ULONGLONG] = "\t.res 8,0";

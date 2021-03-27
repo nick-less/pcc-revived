@@ -149,7 +149,10 @@ typedef long long OFFSZ;
 //	(p->n_op == REG && regno(p)) ? SBREG : SAREG)
 
 /* Return a register class based on the type of the node */
-#define PCLASS(p) (p->n_type > SHORT ? SBREG : SAREG)
+#define PCLASS(p) (p->n_type > UNSIGNED  ? SBREG : SAREG)
+
+//#define PCLASS(p) (p->n_op == REG && regno(p) > 7 ? 0 : \
+//	(p->n_op == REG && regno(p)) ? SBREG : SAREG)
 
 
 #define	NUMCLASS 	2	/* highest number of reg classes used */

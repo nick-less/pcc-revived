@@ -87,7 +87,7 @@ struct optab table[] = {
 	SAREG|SNAME|SOREG,	TAREG,
 	SAREG|SNAME|SOREG,	TAREG,
 		0,	RDEST,
-		"	sta.ZA AL ;0\n", },
+		"	sta.ZA AR ;0\n", },
 
 { ASSIGN,	FOREFF,
 	SBREG|SNAME|SOREG,	TPOINT,
@@ -201,6 +201,13 @@ struct optab table[] = {
 		0,	RLEFT,
 		"	adc AR ; \n", },
 
+
+{ MINUS,	INAREG|FOREFF,
+	SAREG,  TWORD|TPOINT,
+	SAREG|SNAME|SOREG|SCON,	TCHAR|TUCHAR|TWORD|TPOINT,
+	      0,      RLEFT,
+		"	sbc AR ; \n", },
+
 /*
  * Logical/branching operators
  */
@@ -246,7 +253,57 @@ struct optab table[] = {
 		0,	RNOP,
 		"	bra LL\n", },
 
+/*
+ * Arguments to functions.
+ */
 
+
+{ FUNARG,	FOREFF,
+	SCON,	TWORD|TPOINT,
+	SANY,	TWORD|TPOINT,
+		0,	RNULL,
+		"	pea AL\n", },
+		
+
+{ FUNARG,	FOREFF,
+	SAREG,	TWORD|TPOINT,
+	SANY,	TWORD|TPOINT,
+		0,	RNULL,
+		"	pha\n", },
+
+{ FUNARG,	FOREFF,
+	SAREG,	TUCHAR,
+	SANY,	TANY,
+		0,	RNULL,
+		"	dac ZA\n", },
+
+{ STARG,	FOREFF,
+	SAREG,	TPTRTO|TSTRUCT,
+	SANY,	TSTRUCT,
+		NSPECIAL,	0,
+		"ZF", },
+
+/*
+ * Subroutine calls.
+ */
+
+{ CALL,		FOREFF,
+	SCON,	TANY,
+	SANY,	TANY,
+		0,	0,
+		"	jsr CL;0\nZC\n", },
+
+{ CALL,	INAREG,
+	SCON,	TANY,
+	SAREG,	TSHORT|TUSHORT|TWORD|TPOINT,
+		NAREG|NASL|NASR,	RESC1,	/* should be 0 */
+		"	jsr CL;1\nZC\n", },
+
+{ CALL,		FOREFF,
+	SAREG,	TANY,
+	SANY,	TANY,
+		0,	0,
+		"	jsr CL;2\nZC\n", },
 
 
 { STASG, DF(STASG), },
