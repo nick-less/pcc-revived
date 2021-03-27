@@ -71,7 +71,7 @@ void setseg(int seg, char *name) {
  */
 void defloc(struct symtab *sp) {
 	char *name;
-// printf("defloc %s", sp->sname);
+ printf("; defloc %s\n", sp->sname);
 	name = getexname(sp);
 	if (sp->sclass == EXTDEF) {
 		printf("\t.global %s\n", name);
@@ -113,7 +113,7 @@ void bfcode(struct symtab **sp, int cnt) {
 	int i, l;
 
 	int argstacksize;
-
+static TWORD regpregs[] = { AC, POS1, POS2 };
 #ifdef GCC_COMPAT
 	struct attr *ap;
 #endif
@@ -167,13 +167,13 @@ void bfcode(struct symtab **sp, int cnt) {
 	 * At the same time recalculate their arg offset on stack.
 	 * We also get the "pop size" for stdcall.
 	 */
-	printf("bfcode\n");
+	printf(";bfcode\n;");
 	for (i = 0; i < cnt; i++) {
 		sp2 = sp[i];
 		sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
 
 		SETOFF(sz, SZINT);
-printf(" i: %d", i);
+printf(" i: %d sz: %d  %p", i, sz, sp);
 	//	if (cisreg(sp2->stype) == 0 ||
 //		    ((regparmarg - nrarg) * SZINT < sz)) {	/* not in reg */
 			sp2->soffset = argbase;
@@ -186,6 +186,7 @@ printf(" i: %d", i);
 	//	}
 	}
 	printf("\n");
+	printf(";argbase: %d %d\n", argbase, (argbase - ARGINIT)/SZCHAR);
 
 	/*
 	 * Now (argbase - ARGINIT) is used space on stack.
@@ -197,26 +198,26 @@ printf(" i: %d", i);
 		sp2 = sp[i];
 
 		// XXX register parameters, maybe later ... much later...
-		// if ((ISSOU(sp2->stype) && sp2->sclass == REGISTER) ||
-		//     (sp2->sclass == REGISTER && xtemps == 0)) {
+		 if ((ISSOU(sp2->stype) && sp2->sclass == REGISTER) ||
+		     (sp2->sclass == REGISTER && xtemps == 0)) {
 		// 	/* must move to stack */
-		// 	sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
-		// 	SETOFF(sz, SZINT);
-		// 	SETOFF(autooff, SZINT);
-		// 	reg = sp2->soffset;
-		// 	sp2->sclass = AUTO;
-		// 	sp2->soffset = NOOFFSET;
-		// 	oalloc(sp2, &autooff);
-        //                 for (j = 0; j < sz/SZCHAR; j += 4) {
-        //                         p = block(OREG, 0, 0, INT, 0, 0);
-        //                         slval(p, sp2->soffset/SZCHAR + j);
-        //                         regno(p) = FPREG;
-        //                         n = block(REG, 0, 0, INT, 0, 0);
-        //                         regno(n) = regpregs[reg++];
-        //                         p = block(ASSIGN, p, n, INT, 0, 0);
-        //                         ecomp(p);
-        //                 }
-		// } else 
+		 	sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
+		 	SETOFF(sz, SZINT);
+		 	SETOFF(autooff, SZINT);
+		 	reg = sp2->soffset;
+		 	sp2->sclass = AUTO;
+		 	sp2->soffset = NOOFFSET;
+		 	oalloc(sp2, &autooff);
+                         for (j = 0; j < sz/SZCHAR; j += 4) {
+                                 p = block(OREG, 0, 0, INT, 0, 0);
+                                 slval(p, sp2->soffset/SZCHAR + j);
+                                 regno(p) = FPREG;
+                                 n = block(REG, 0, 0, INT, 0, 0);
+                                 regno(n) = regpregs[reg++];
+                                 p = block(ASSIGN, p, n, INT, 0, 0);
+                                 ecomp(p);
+                         }
+		 } else 
 		if (cisreg(sp2->stype) && !ISSOU(sp2->stype) &&
 		    ((cqual(sp2->stype, sp2->squal) & VOL) == 0) && xtemps) {
 
@@ -257,7 +258,7 @@ printf(" i: %d", i);
 /* called just before final exit */
 /* flag is 1 if errors, 0 if none */
 void ejobcode(int flag) {
-	printf("ejobcode%d\n", 0);
+	printf("; ejobcode :state %d\n", flag);
 	fflush(stdout);
 
 	if (flag)
@@ -267,14 +268,14 @@ void ejobcode(int flag) {
 
 /* begin of job emit code */
 void bjobcode(void) { 
-	printf("\t.fopt compiler,\"PCC: %s\"\n", VERSSTR);
+	printf(".fopt compiler,\"PCC: %s\"\n", VERSSTR);
 
 
 	printf(".P816\n");
 	printf(".A16\n");
 	printf(".I16\n");
 
-	printf("	.importzp	zp1l, zp2l, zp3l, zp4l\n");
+	printf(".importzp	zp1l, zp2l, zp3l, zp4l\n");
 
 	/* Set correct names for our types */
 	astypnames[SHORT] = astypnames[USHORT] = "\t^";
@@ -322,6 +323,9 @@ NODE * funcode(NODE *p) {
 
 /* fix up type of field p */
 void fldty(struct symtab *p) {
+
+
+	printf("; fldty %s\n", p->sname);
 }
 
 /*

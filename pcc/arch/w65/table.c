@@ -62,6 +62,11 @@ struct optab table[] = {
 		" pconv", },
 
 /* assignment */
+{ ASSIGN,	FOREFF,
+	SNAME,	TWORD|TINT|TPOINT,
+	SZERO,	TANY,
+		0,	0,
+		"	stz AL\n", },
 
 { ASSIGN,	INAREG,
 	SAREG,	TCHAR|TUCHAR|TWORD|TPOINT,
@@ -84,10 +89,10 @@ struct optab table[] = {
 		"	move.l UR,UL\n", },
 
 { ASSIGN,	FOREFF,
-	SAREG|SNAME|SOREG,	TAREG,
-	SAREG|SNAME|SOREG,	TAREG,
+	SAREG,	TAREG,
+	SNAME|SOREG,	TAREG,
 		0,	RDEST,
-		"	sta.ZA AL ;0\n", },
+		"	sta AR ;0\n", },
 
 { ASSIGN,	FOREFF,
 	SBREG|SNAME|SOREG,	TPOINT,
@@ -99,7 +104,7 @@ struct optab table[] = {
 	SAREG|SNAME|SOREG,	TAREG,
 	SAREG,			TAREG,
 		0,	RDEST,
-		"	move.ZA AR,AL ;2\n", },
+		"	sta AL ;2\n", },
 
 { ASSIGN,	SANY,
 	SAREG|SNAME|SOREG|SCON,	TCHAR|TUCHAR|TWORD|TINT,
@@ -120,7 +125,7 @@ struct optab table[] = {
 	SAREG,	TINT,
 	SAREG|SCON|SOREG|SNAME, TAREG,
 		NAREG|NASL,	RESC1,
-		"	lda.ZA AL   ;51\n", },
+		"	lda AL   ;51\n", },
 
 { OPLTYPE,	INAREG,
 	SANY,	TANY,
@@ -167,7 +172,7 @@ struct optab table[] = {
 	SANY,	TANY,
 	SAREG|STARREG,	TANY,
 		NAREG,	RESC1,
-		"	lda.ZA AR ;3\n", },
+		"	lda AR ;3\n", },
 
 { UMUL,	INAREG,
 	SANY,	TANY,
@@ -263,7 +268,7 @@ struct optab table[] = {
 	SCON,	TWORD|TPOINT,
 	SANY,	TWORD|TPOINT,
 		0,	RNULL,
-		"	pea AL\n", },
+		"	pea CL\n", },
 		
 
 { FUNARG,	FOREFF,
@@ -772,7 +777,7 @@ struct optab table2[] = {
  * The next rules takes care of assignments. "=".
  */
 { ASSIGN,	FOREFF,
-	SNAME,	TWORD|TPOINT,
+	SNAME,	TWORD|TINT|TPOINT,
 	SZERO,	TANY,
 		0,	0,
 		"	dzm AL\n", },

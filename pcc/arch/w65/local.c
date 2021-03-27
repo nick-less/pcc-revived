@@ -188,7 +188,17 @@ switch( o = p->n_op ){
 			case STATIC:
 			fprintf(stderr, "static\n");
 				break;
-		}
+		case EXTERN:
+		case EXTDEF:
+/*
+			if (kflag == 0)
+				break;
+			if (blevel > 0 && !statinit)
+				p = picext(p);
+				*/
+			break;
+			
+			}
 		break;
 	case PCONV:
 			fprintf(stderr, "clocal PCONV\n");
@@ -376,7 +386,12 @@ return p;
 	return(p);
 }
 
-
+/**
+	This function is called for each node just before the
+		node tree is written out to pass2. Common usage here
+		may be to for example save floating constants to memory
+		and converting the constants to memory references.
+ */
 void myp2tree(NODE *p) {
 
 	fprintf(stderr, "myp2free %p\n",p);
@@ -511,30 +526,44 @@ TWORD ctype(TWORD type) {
 void calldec(NODE *p, NODE *q)  {
 }
 
+/**
+  * Let the target declare an external referenced variable.
+  */
 void extdec(struct symtab *q) {
+	char *name = getexname(q);
+
+	printf(".import %s ; extdec\n", name);
 }
 
 /* make a common declaration for id, if reasonable */
 void defzero(struct symtab *sp) {
 	int off, al;
-	char *name;
+	char *name = getexname(sp);
+
+		printf(";defzero  %s\n", name);
 
 	name = getexname(sp);
+
 	off = tsize(sp->stype, sp->sdf, sp->sap);
 	SETOFF(off,SZCHAR);
 	off /= SZCHAR;
 	al = talign(sp->stype, sp->sap)/SZCHAR;
+// 	if (sp->sclass == EXTERN) {
 
+/*
 	if (sp->sclass == STATIC) {
 		if (sp->slevel == 0) {
-			printf("\t.local %s\n", name);
+			printf("1\t %s\n", name);
 		} else
-			printf("\t.local " LABFMT "\n", sp->soffset);
+			printf("2\t " LABFMT "\n", sp->soffset);
 	}
-	if (sp->slevel == 0) {
-		printf("\t.comm %s,0%o,%d\n", name, off, al);
+	*/
+//	if (sp->slevel == 0) {
+		printf("%s: .res %d\n", name,  off);
+	/*
 	} else
-		printf("\t.comm " LABFMT ",0%o,%d\n", sp->soffset, off, al);
+		printf("4\t " LABFMT ",0%o,%d\n", sp->soffset, off, al);
+		*/
 }
 
 char *nextsect;
@@ -554,6 +583,9 @@ int mypragma(char *str) {
  */
 void fixdef(struct symtab *sp) {
 	struct attr *ga;
+
+//printf(";fixdef %s\n", getexname(sp));
+//printf("; spclass %d\n", sp->sclass);
 
 #ifdef HAVE_WEAKREF
 	/* not many as'es have this directive */

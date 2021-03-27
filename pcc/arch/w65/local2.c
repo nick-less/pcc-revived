@@ -38,13 +38,7 @@ char *rnames[] = {
 	"AC", "POS1", "POS1", "POS1", "POS1", "POS1", "POS1", "POS1", 
 	"FP", "SP",
 };
-/**
- * ca65 has no .file directive so overwrite  printdotfile to disable ".file"
- */
-void printdotfile(char *file) {
-	printf("; %s\n", file);
 
-}
 
 void deflab(int label) {
 	printf(LABFMT ":\n", label);
@@ -79,7 +73,8 @@ void eoftn(struct interpass_prolog *ipp) {
 }
 
 /*
- * add/sub/...
+ * Called for an O macro in the table, o is the opcode and
+ * f is the argument.  Supposed to write out simple ops.
  *
  * Param given:
  */
@@ -87,12 +82,6 @@ void hopcode(int f, int o) {
 	char *str;
 
 	switch (o) {
-	case PLUS:
-		str = "adc";
-		break;
-	case MINUS:
-		str = "sbc";
-		break;
 	case AND:
 		str = "and";
 		break;
@@ -252,10 +241,6 @@ void zzzcode(NODE *p, int c) {
 		}
 //		fwalk(p, e2print, 0);
 		break;
-	case 'J': // indexed access;
-	printf(";indexed access");
-//		fwalk(p, e2print, 0);
-	break;
 	case 'R': // output based on register
 		r = getlr( p, 'L');
 		printf("%s", r->n_rval==0?"p":rnames[r->n_rval]);

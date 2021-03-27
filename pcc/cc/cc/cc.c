@@ -2015,8 +2015,10 @@ struct flgcheck ldflgcheck[] = {
 	{ &shared, 1, "-shared" },
 #endif
 #if !defined(os_sunos) && !defined(os_win32)
-#ifndef os_darwin
+#ifndef os_darwin 
+#ifndef w65_wdc
 	{ &shared, 0, "-d" },
+#endif
 #endif
 #endif
 #ifdef os_darwin
@@ -2061,8 +2063,10 @@ setup_ld_flags(void)
 			strlist_append(&early_linker_flags, dynlinkarg);
 			strlist_append(&early_linker_flags, dynlinklib);
 		}
+#ifndef w65_wdc
 		strlist_append(&early_linker_flags, "-e");
 		strlist_append(&early_linker_flags, STARTLABEL);
+#endif
 	}
 	if (shared == 0 && rflag)
 		strlist_append(&early_linker_flags, "-r");

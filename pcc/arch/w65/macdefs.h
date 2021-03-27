@@ -57,17 +57,17 @@
  */
 #define ALCHAR         8
 #define ALBOOL         8
-#define ALSHORT        16
-#define ALINT          16
-#define ALLONG         32
-#define ALPOINT        32
-#define ALLONGLONG     64
-#define ALFLOAT        32
-#define ALDOUBLE       64
-#define ALLDOUBLE      64      /* ???? */
+#define ALSHORT        8
+#define ALINT          8
+#define ALLONG         8
+#define ALPOINT        8
+#define ALLONGLONG     8
+#define ALFLOAT        8
+#define ALDOUBLE       8
+#define ALLDOUBLE      8      /* ???? */
 /* #undef ALSTRUCT     m68k struct alignment is member defined */
-#define ALSTACK        32
-#define ALMAX          64 
+#define ALSTACK        8
+#define ALMAX          8 
 
 /*
  * Min/max values.
@@ -107,10 +107,12 @@ typedef long long OFFSZ;
 #undef	FIELDOPS		/* no bit-field instructions */
 #define TARGET_ENDIAN TARGET_LE
 
-#define FINDMOPS	/* to find isz */
+#define FINDMOPS	/* has instructions that modifies memory  */
 #define	CC_DIV_0	/* division by zero is safe in the compiler */
 #define BYTEOFF(x)	((x)&01)
-#define	WORD_ADDRESSED
+
+#define	MYDOTFILE
+#define	printdotfile(x)
 
 #define	szty(t)	(((t) == DOUBLE || (t) == FLOAT || \
 	(t) == LONGLONG || (t) == ULONGLONG) ? 2 : (t) == LDOUBLE ? 3 : 1)
@@ -165,6 +167,8 @@ int COLORMAP(int c, int *r);
 #define ENCRA2(x)	((x) << 12)	/* A2 */
 #define ENCRA(x,y)	((x) << (6+y*6))	/* encode regs in int */
 #define	RETREG(x)	AC
+
+
 
 /* XXX - to die */
 #define FPREG	FP	/* frame pointer */
