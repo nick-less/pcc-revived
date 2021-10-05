@@ -1,4 +1,4 @@
-/*	$Id: reader.c,v 1.302 2017/03/11 09:22:09 ragge Exp $	*/
+/*	$Id: reader.c,v 1.305 2021/09/20 10:37:51 gmcgarry Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -507,7 +507,6 @@ mainp2()
 			    &ipp->ipp_vis, &ip->ip_lbl, &ipp->ip_tmpnum,
 			    &ipp->ip_lblnum, nam);
 			ipp->ipp_name = xstrdup(nam);
-			memset(ipp->ipp_regs, -1, sizeof(ipp->ipp_regs));
 			ipp->ipp_autos = -1;
 			ipp->ip_labels = foo;
 #ifdef TARGET_IPP_MEMBERS
@@ -531,7 +530,6 @@ mainp2()
 			ipp->ip_tmpnum = rdint(&p);
 			ipp->ip_lblnum = rdint(&p);
 			ipp->ipp_name = rdstr(&p);
-			memset(ipp->ipp_regs, 0, sizeof(ipp->ipp_regs));
 			SKIPWS(p);
 			if (*p == '+') {
 				int num, i;
@@ -557,7 +555,17 @@ mainp2()
 #endif
 			pass2_compile((struct interpass *)ipp);
 			break;
-
+		case '$': /* assembler */
+			if (*p) {
+				int sz = strlen(p);
+				ip = malloc(sizeof(struct interpass));
+				ip->type = IP_ASM;
+				ip->ip_asm = tmpalloc(sz+1);
+                		memcpy(ip->ip_asm, p, sz);
+				ip->ip_asm[sz] = 0;
+				pass2_compile(ip);
+			}
+			break;
 		default:
 			comperr("bad string %s", b);
 		}
@@ -588,16 +596,16 @@ pass2_compile(struct interpass *ip)
 	if (ip->type != IP_EPILOG)
 		return;
 
+	afree();
+	p2e->epp = (struct interpass_prolog *)DLIST_PREV(&p2e->ipole, qelem);
+	p2maxautooff = p2autooff = p2e->epp->ipp_autos;
+
 #ifdef PCC_DEBUG
 	if (e2debug) {
 		printf("Entering pass2\n");
 		printip(&p2e->ipole);
 	}
 #endif
-
-	afree();
-	p2e->epp = (struct interpass_prolog *)DLIST_PREV(&p2e->ipole, qelem);
-	p2maxautooff = p2autooff = p2e->epp->ipp_autos;
 
 #ifdef PCC_DEBUG
 	sanitychecks(p2e);
@@ -727,7 +735,7 @@ emit(struct interpass *ip)
 		deflab(ip->ip_lbl);
 		break;
 	case IP_ASM:
-		printf("%s", ip->ip_asm);
+		printf("%s\n", ip->ip_asm);
 		break;
 	default:
 		cerror("emit %d", ip->type);
