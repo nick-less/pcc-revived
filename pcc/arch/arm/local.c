@@ -1,4 +1,4 @@
-/*      $Id: local.c,v 1.36 2021/08/09 00:23:24 gmcgarry Exp $    */
+/*      $Id: local.c,v 1.38 2022/11/05 02:21:30 gmcgarry Exp $    */
 /*
  * Copyright (c) 2007 Gregory McGarry (g.mcgarry@ieee.org).
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
@@ -161,6 +161,7 @@ clocal(NODE *p)
 		}
 		break;
 
+#if 0
 	case STNAME:
 		if ((q = p->n_sp) == NULL)
 			return p;
@@ -171,6 +172,7 @@ clocal(NODE *p)
 		    p->n_df, p->n_ap);
 		p = block(UMUL, p, NIL, ty, p->n_df, p->n_ap);
 		break;
+#endif
 
 	case FORCE:
 		/* put return value in return reg */
@@ -331,7 +333,7 @@ myp2tree(NODE *p)
 	sp->squal = (CON >> TSHIFT);
 
 	defloc(sp);
-	ninval(0, tsize(sp->stype, sp->sdf, sp->sap), p);
+	inval(0, tsize(sp->stype, sp->sdf, sp->sap), p);
 
 	p->n_op = NAME;
 	slval(p, 0);
