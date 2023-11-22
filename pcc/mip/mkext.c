@@ -1,4 +1,4 @@
-/*	$Id: mkext.c,v 1.55 2022/11/25 14:50:11 ragge Exp $	*/
+/*	$Id: mkext.c,v 1.60 2023/10/12 10:34:12 ragge Exp $	*/
 
 /*
  * Generate defines for the needed hardops.
@@ -23,6 +23,23 @@
 int chkop[DSIZE];
 
 void mktables(void);
+
+#ifdef NEWSHAPES
+#define DEFSH(a,A)      struct shape a = { REG, A, 0 }
+/* default shapes */
+DEFSH(shareg, CLASSA);
+DEFSH(shbreg, CLASSB);
+DEFSH(shcreg, CLASSC);
+DEFSH(shdreg, CLASSD);
+DEFSH(shereg, CLASSE);
+DEFSH(shfreg, CLASSF);
+DEFSH(shgreg, CLASSG);
+struct shape shoreg = { OREG, 0, 0 };
+struct shape shname = { NAME, 0, 0 };
+struct shape shicon = { ICON, MIN_LONGLONG, MAX_LONGLONG };
+struct shape shone = { ICON, 1, 1 };
+struct shape shzero = { ICON, 0, 0 };
+#endif
 
 char *ftitle;
 char *cname = "external.c";
@@ -113,7 +130,6 @@ compl(struct optab *q, char *str)
 /*
  * Find reg class for top of node.
  */
-#ifdef NEWNEED
 char *
 hasneed(char *w, int need)
 {
@@ -138,32 +154,10 @@ getrcl(struct optab *q)
 	while ((w = hasneed(w, cNREG))) {
 		if ((i += w[2]) >= r)
 			return c[(int)w[1]];
-		w += 2;
+		w += 3;
 	}
 	return 0;
 }
-
-#else
-static int
-getrcl(struct optab *q)
-{
-	int v = q->needs &
-	    (NACOUNT|NBCOUNT|NCCOUNT|NDCOUNT|NECOUNT|NFCOUNT|NGCOUNT);
-	int r = q->rewrite & RESC1 ? 1 : q->rewrite & RESC2 ? 2 : 3;
-	int i = 0;
-
-#define INCK(c) while (v & c##COUNT) { \
-	v -= c##REG, i++; if (i == r) return I##c##REG; }
-	INCK(NA)
-	INCK(NB)
-	INCK(NC)
-	INCK(ND)
-	INCK(NE)
-	INCK(NF)
-	INCK(NG)
-	return 0;
-}
-#endif
 
 int
 main(int argc, char *argv[])
@@ -270,6 +264,7 @@ printf("reg %d rstatus 0x%x %s\n", i, rstatus[i],
 	rval = 0;
 	for (q = table; q->op != FREE; q++) {
 		switch (q->op) {
+#ifndef NEWSHAPES
 		case ASSIGN:
 #define	F(x) (q->visit & x && q->rewrite & (RLEFT|RRIGHT) && \
 		    q->lshape & ~x && q->rshape & ~x)
@@ -280,20 +275,20 @@ printf("reg %d rstatus 0x%x %s\n", i, rstatus[i],
 			}
 #undef F
 			/* FALLTHROUGH */
+#endif
 		case STASG:
 			if ((q->visit & INREGS) && !(q->rewrite & RDEST)) {
 				compl(q, "ASSIGN/STASG reclaim must be RDEST");
 				rval++;
 			}
 			break;
+		case STCLR:
+			fprintf(fh, "#define HAS_STCLR\n");
+			break;
 		}
 		/* check that reclaim is not the wrong class */
 		if ((q->rewrite & (RESC1|RESC2|RESC3)) && 
-#ifdef NEWNEED
 		    hasneed(q->needs, cNREW) == 0) {
-#else
-		    !(q->needs & REWRITE)) {
-#endif
 			if ((q->visit & getrcl(q)) == 0) {
 				compl(q, "wrong RESCx class");
 				rval++;
@@ -523,16 +518,16 @@ printf("TEMPREG 0x%x PERMREG 0x%x PREMREG 0x%x\n", TEMPREG, PERMREG, PREMREG);
 	nelem = (MAXREGS+bitsz-1)/bitsz;
 	fprintf(fc, "static bittype ovlarr[MAXREGS][%d] = {\n", nelem);
 	for (i = 0; i < MAXREGS; i++) {
-		int el[10];
+		unsigned long el[10];
 		memset(el, 0, sizeof(el));
-		el[i/bitsz] = 1 << (i % bitsz);
+		el[i/bitsz] = (unsigned long)1 << (i % bitsz);
 		for (j = 0; roverlay[i][j] >= 0; j++) {
 			int k = roverlay[i][j];
-			el[k/bitsz] |= (1 << (k % bitsz));
+			el[k/bitsz] |= ((unsigned long)1 << (k % bitsz));
 		}
 		fprintf(fc, "{ ");
 		for (j = 0; j < MAXREGS; j += bitsz)
-			fprintf(fc, "0x%x, ", el[j/bitsz]);
+			fprintf(fc, "0x%lx, ", el[j/bitsz]);
 		fprintf(fc, " },\n");
 	}
 	fprintf(fc, "};\n");

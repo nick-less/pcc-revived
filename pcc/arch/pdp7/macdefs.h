@@ -1,4 +1,4 @@
-/*	$Id: macdefs.h,v 1.9 2021/10/08 15:59:07 ragge Exp $	*/
+/*	$Id: macdefs.h,v 1.11 2023/08/20 15:30:30 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -176,3 +176,8 @@ extern int msettings;
 /* For acceptable() */
 #define	USECHAR9	0200
 #define	USECHAR18	0400
+
+/* floating point definitions XXX incorrect here */
+#define FDFLOAT
+#define DEFAULT_FPI_DEFS { &fpi_ffloat, &fpi_dfloat, &fpi_dfloat }
+

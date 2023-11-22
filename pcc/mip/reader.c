@@ -1,4 +1,4 @@
-/*	$Id: reader.c,v 1.308 2022/12/04 17:01:37 ragge Exp $	*/
+/*	$Id: reader.c,v 1.312 2023/10/16 17:07:06 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -335,6 +335,8 @@ latechecks(NODE *p, void *arg)
 	if (p->n_op == CALL && p->n_left->n_op == ICON && 
 	    strcmp(p->n_left->n_name, "alloca") == 0)
 		*flags |= IF_NEEDFP; /* alloca may modify FP */
+	if (callop(p->n_op))
+		*flags |= IF_NOTLEAF;
 }
 
 #ifdef PASS2
@@ -592,6 +594,82 @@ mainp2()
 
 #endif
 
+#ifdef NEWPARAMS
+static void
+prepnode(NODE *p, struct interpass *iplnk)
+{
+	struct interpass *ip;
+
+	ip = ipnode(p);
+	DLIST_INSERT_BEFORE(iplnk, ip, qelem);
+}
+
+/*
+ * If a CALL has its parameters in registers then prepend all CALLs and UCALLs
+ * below to its own IP links.
+ * But for any CALL which only has its parameters in memory we do
+ * 1) not care about UCALLs below and 2) leave the topmost call in the tree.
+ */
+static void
+callsrch(NODE *p, struct interpass *iplnk, int prepucall)
+{
+	NODE *q, *r;
+	int o = p->n_op;
+	int prepcall = 0;
+
+	if (o == CALL || o == STCALL) {
+		for (q = p->n_right; q->n_op == CM; q = q->n_left)
+			if (q->n_right->n_op == ASSIGN && 
+			    q->n_right->n_left->n_op == REG)
+				prepucall = 1;
+		prepcall = 1;
+	}
+
+	if (optype(o) == BITYPE)
+		callsrch(p->n_right, iplnk, prepucall);
+	if (optype(o) != LTYPE)
+		callsrch(p->n_left, iplnk, prepucall);
+
+	if (callop(o) == 0)
+		return;
+
+	if (o == CALL || o == STCALL) {
+		/* prepend function args before this call */
+		for (q = p->n_right; q->n_op == CM; q = nfree(q))
+			prepnode(q->n_right, iplnk);
+		prepnode(q, iplnk);
+		p->n_op++; /* make UCALL */
+	}
+	if (prepcall || prepucall) {
+		if (iplnk->ip_node != p) {
+			int num = p2env.epp->ip_tmpnum++;
+			q = mklnode(TEMP, 0, num, p->n_type);
+			r = talloc(); *r = *p;
+			q = mkbinode(ASSIGN, q, r, p->n_type);
+			prepnode(q, iplnk);
+			p->n_op = TEMP;
+			regno(p) = num;
+		}
+	}
+	return;
+}
+
+/*
+ * For each tree, search for calls.
+ */
+static void
+nodesrch(struct p2env *p2e)
+{
+	struct interpass *ip;
+
+	DLIST_FOREACH(ip, &p2e->ipole, qelem) {
+		if (ip->type != IP_NODE)
+			continue;
+		callsrch(ip->ip_node, ip, 0);
+	}
+}
+#endif
+
 /*
  * Receives interpass structs from pass1.
  */
@@ -677,6 +755,10 @@ pass2_compile(struct interpass *ip)
 			DLIST_INSERT_BEFORE(ip, tipp, qelem);
 		}
 	}
+
+#ifdef NEWPARAMS
+	nodesrch(p2e);	/* fix call order */
+#endif
 
 	fixxasm(p2e); /* setup for extended asm */
 
@@ -974,27 +1056,17 @@ ckmove(NODE *p, NODE *q)
 {
 	struct optab *t = &table[TBLIDX(p->n_su)];
 	int reg;
+	char *w;
 
 	if (q->n_op != REG || p->n_reg == -1)
 		return; /* no register */
 
 	/* do we have a need for special reg? */
-#ifdef NEWNEED
-	{
-		char *w;
 
-		if ((w = hasneed(t->needs,  p->n_left == q ? cNL : cNR)) != NULL)
-			reg = w[1];
-		else
-			reg = DECRA(p->n_reg, 0);
-	}
-#else
-	if ((t->needs & NSPECIAL) &&
-	    (reg = rspecial(t, p->n_left == q ? NLEFT : NRIGHT)) >= 0)
-		;
+	if ((w = hasneed(t->needs,  p->n_left == q ? cNL : cNR)) != NULL)
+		reg = w[1];
 	else
 		reg = DECRA(p->n_reg, 0);
-#endif
 
 	if (reg < 0 || reg == DECRA(q->n_reg, 0))
 		return; /* no move necessary */
@@ -1133,13 +1205,8 @@ allo(NODE *p, struct optab *q)
 	for (i = 0; i < NRESC; i++)
 		if (resc[i].n_op != FREE)
 			comperr("allo: used reg");
-#ifdef NEWNEED
 	if (n == 0 && hasneed(q->needs, cNTEMP) == 0)
 		return;
-#else
-	if (n == 0 && (q->needs & NTMASK) == 0)
-		return;
-#endif
 	for (i = 0; i < n+1; i++) {
 		resc[i].n_op = REG;
 		resc[i].n_type = p->n_type; /* XXX should be correct type */
@@ -1148,11 +1215,7 @@ allo(NODE *p, struct optab *q)
 	}
 	if (i > NRESC)
 		comperr("allo: too many allocs");
-#ifdef NEWNEED
 	if (hasneed(q->needs, cNTEMP)) {
-#else
-	if (q->needs & NTMASK) {
-#endif
 #ifdef	MYALLOTEMP
 		MYALLOTEMP(resc[i], stktemp);
 #else
@@ -1247,16 +1310,10 @@ gencode(NODE *p, int cookie)
 
 	canon(p);
 
-#ifdef NEWNEED
 	if (q->needs) {
 		char *w;
 		int rr = ((w = hasneed(q->needs, cNR)) ? w[1] : -1);
 		int lr = ((w = hasneed(q->needs, cNL)) ? w[1] : -1);
-#else
-	if (q->needs & NSPECIAL) {
-		int rr = rspecial(q, NRIGHT);
-		int lr = rspecial(q, NLEFT);
-#endif
 
 		if (rr >= 0) {
 #ifdef PCC_DEBUG
@@ -1307,14 +1364,9 @@ gencode(NODE *p, int cookie)
 	    DECRA(p->n_reg, 0) != RETREG(p->n_type)) {
 		CDEBUG(("gencode(%p) retreg\n", p));
 		rmove(RETREG(p->n_type), DECRA(p->n_reg, 0), p->n_type);
-#ifdef NEWNEED
 	} else if (q->needs) {
 		char *w;
 		int rr = ((w = hasneed(q->needs, cNRES)) ? w[1] : -1);
-#else
-	} else if (q->needs & NSPECIAL) {
-		int rr = rspecial(q, NRES);
-#endif
 
 		if (rr >= 0 && DECRA(p->n_reg, 0) != rr) {
 			CDEBUG(("gencode(%p) nspec retreg\n", p));
@@ -1738,20 +1790,6 @@ ipnode(NODE *p)
 	ip->lineno = thisline;
 	return ip;
 }
-
-#ifndef NEWNEED
-int
-rspecial(struct optab *q, int what)
-{
-	struct rspecial *r = nspecial(q);
-	while (r->op) {
-		if (r->op == what)
-			return r->num;
-		r++;
-	}
-	return -1;
-}
-#endif
 
 #ifndef XASM_NUMCONV
 #define	XASM_NUMCONV(x,y,z)	0

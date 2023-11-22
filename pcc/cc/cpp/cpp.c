@@ -1,4 +1,4 @@
-/*	$Id: cpp.c,v 1.328 2022/12/01 19:04:34 ragge Exp $	*/
+/*	$Id: cpp.c,v 1.330 2023/08/07 07:53:01 ragge Exp $	*/
 
 /*
  * Copyright (c) 2004,2010 Anders Magnusson (ragge@ludd.luth.se).
@@ -952,7 +952,7 @@ include_next(void)
 	fn = addname(&ob->buf[1]);
 	bufree(ob);
 	if (fsrch(fn, ifiles->idx, ifiles->incs) == 0)
-		error("cannot find '%s'", &ob->buf[1]);
+		error("cannot find '%s'", fn);
 
 	prtline(1);
 }
@@ -1467,7 +1467,10 @@ blkget(struct symtab *sp, int id)
 		blokx[upper] = xmalloc(CPPBUF);
 	blokx[upper][off].sp = sp;
 	blokx[upper][off].nidx = id;
-	return blkidp++;
+	id = blkidp++;
+	if ((blkidp & 0377) == 0)
+		blkidp++;
+	return id;
 }
 
 static int

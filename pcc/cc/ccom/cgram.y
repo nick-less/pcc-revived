@@ -1,4 +1,4 @@
-/*	$Id: cgram.y,v 1.423 2022/11/11 14:51:21 ragge Exp $	*/
+/*	$Id: cgram.y,v 1.430 2023/08/13 14:05:40 ragge Exp $	*/
 
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
@@ -80,26 +80,28 @@
 /*
  * Token used in C lex/yacc communications.
  */
-%token	C_STRING	/* a string constant */
-%token	C_ICON		/* an integer constant */
-%token	C_FCON		/* a floating point constant */
-%token	C_NAME		/* an identifier */
-%token	C_TYPENAME	/* a typedef'd name */
-%token	C_ANDAND	/* && */
-%token	C_OROR		/* || */
-%token	C_GOTO		/* unconditional goto */
-%token	C_RETURN	/* return from function */
-%token	C_TYPE		/* a type */
-%token	C_CLASS		/* a storage class */
-%token	C_ASOP		/* assignment ops */
-%token	C_RELOP		/* <=, <, >=, > */
-%token	C_EQUOP		/* ==, != */
-%token	C_DIVOP		/* /, % */
-%token	C_SHIFTOP	/* <<, >> */
-%token	C_INCOP		/* ++, -- */
-%token	C_UNOP		/* !, ~ */
-%token	C_STROP		/* ., -> */
-%token	C_STRUCT
+%token	<strp>   C_STRING	/* a string constant */
+%token	<li>     C_ICON		/* an integer constant */
+%token	<flt>    C_FCON		/* a floating point constant */
+%token	<strp>   C_NAME		/* an identifier */
+%token	<strp>   C_TYPENAME	/* a typedef'd name */
+%token	<intval> C_ANDAND	/* && */
+%token	<intval> C_OROR		/* || */
+%token	         C_GOTO		/* unconditional goto */
+%token	         C_RETURN	/* return from function */
+%token	<type>   C_TYPE		/* a type */
+%token	<type>   C_CLASS	/* a storage class */
+%token	<intval> C_ASOP		/* assignment ops */
+%token	<intval> C_RELOP	/* <=, <, >=, > */
+%token	<intval> C_EQUOP	/* ==, != */
+%token	<intval> C_DIVOP	/* /, % */
+%token	<intval> C_SHIFTOP	/* <<, >> */
+%token	<intval> C_INCOP	/* ++, -- */
+%token	<intval> C_UNOP		/* !, ~ */
+%token	<intval> C_STROP	/* ., -> */
+%token	<intval> C_STRUCT
+%token	<type>   C_QUALIFIER
+%token	<type>   C_FUNSPEC
 %token	C_IF
 %token	C_ELSE
 %token	C_SWITCH
@@ -113,14 +115,12 @@
 %token	C_SIZEOF
 %token	C_ENUM
 %token	C_ELLIPSIS
-%token	C_QUALIFIER
-%token	C_FUNSPEC
 %token	C_ASM
 %token	NOMATCH
 %token	C_TYPEOF	/* COMPAT_GCC */
 %token	C_ATTRIBUTE	/* COMPAT_GCC */
 %token	PCC_OFFSETOF
-%token	GCC_DESIG
+%token	<strp>   GCC_DESIG
 
 /* C11 keywords */
 %token	C_STATICASSERT
@@ -153,6 +153,13 @@
 # include <stdarg.h>
 # include <string.h>
 # include <stdlib.h>
+
+#undef n_type
+#define n_type ptype
+#undef n_qual
+#define n_qual pqual
+#undef n_df
+#define n_df pdf
 
 int fun_inline;	/* Reading an inline function */
 int oldstyle;	/* Current function being defined */
@@ -278,20 +285,10 @@ struct savbc {
 		attribute_list attr_spec_list attr_var /* COMPAT_GCC */
 
 %type <g>	gen_ass_list gen_assoc
-%type <strp>	string C_STRING GCC_DESIG svstr
+%type <strp>	string svstr moe
 %type <rp>	str_head
 %type <symp>	xnfdeclarator clbrace enum_head
 
-%type <intval>  C_STRUCT C_RELOP C_DIVOP C_SHIFTOP
-		C_ANDAND C_OROR C_STROP C_INCOP C_UNOP C_ASOP C_EQUOP
-
-%type <type>	C_TYPE C_QUALIFIER C_CLASS C_FUNSPEC
-
-%type <li>   C_ICON
-
-%type <flt>	C_FCON 
-
-%type <strp>	C_NAME C_TYPENAME
 %%
 
 ext_def_list:	   ext_def_list external_def
@@ -335,9 +332,9 @@ type_sq:	   C_TYPE { $$ = mkty($1, 0, 0); }
 		|  C_TYPENAME { 
 			struct symtab *sp = lookup($1, 0);
 			if (sp->stype == ENUMTY) {
-				sp->stype = strmemb(sp->sap)->stype;
+				sp->stype = strmemb(sp->td->ss)->stype;
 			}
-			$$ = mkty(sp->stype, sp->sdf, sp->sap);
+			$$ = mkty(sp->stype, sp->sdf, sp->sss);
 			$$->n_sp = sp;
 		}
 		|  struct_dcl { $$ = $1; }
@@ -351,7 +348,7 @@ type_sq:	   C_TYPE { $$ = mkty($1, 0, 0); }
 		|  C_ALIGNAS '(' cast_type ')' {
 			TYMFIX($3);
 			$$ = biop(ALIGN, NULL, NULL);
-			slval($$, talign($3->n_type, $3->n_ap)/SZCHAR);
+			slval($$, talign($3->n_type, $3->pss)/SZCHAR);
 			p1tfree($3);
 		}
 		|  C_ATOMIC { uerror("_Atomic not supported"); $$ = bcon(0); }
@@ -441,7 +438,8 @@ type_qualifier_list:
 			$$->n_qual |= $2;
 		}
 		|  attribute_specifier {
-			$$ = block(UMUL, NULL, NULL, 0, 0, gcc_attr_wrapper($1));
+			$$ = block(UMUL, NULL, NULL, 0, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($1);
 		}
 		|  type_qualifier_list attribute_specifier {
 			$1->n_ap = attr_add($1->n_ap, gcc_attr_wrapper($2));
@@ -483,8 +481,8 @@ parameter_declaration:
 		   declaration_specifiers declarator attr_var {
 			if (glval($1) != SNULL && glval($1) != REGISTER)
 				uerror("illegal parameter class");
-			$$ = block(TYMERGE, $1, $2, INT, 0,
-			    gcc_attr_wrapper($3));
+			$$ = block(TYMERGE, $1, $2, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($3);
 		}
 		|  declaration_specifiers abstract_declarator { 
 			$1->n_ap = attr_add($1->n_ap, $2->n_ap);
@@ -507,34 +505,33 @@ abstract_declarator:
 			$$->n_left = $3;
 		}
 		|  '(' abstract_declarator ')' { $$ = $2; }
-		|  '[' maybe_r ']' attr_var {
-			$$ = block(LB, bdty(NAME, NULL), bcon(NOOFFSET),
-			    INT, 0, gcc_attr_wrapper($4));
-		}
-		|  '[' e ']' attr_var {
-			$$ = block(LB, bdty(NAME, NULL), $2,
-			    INT, 0, gcc_attr_wrapper($4));
+		|  '[' ecq ']' attr_var {
+			$$ = block(LB, bdty(NAME, NULL), $2, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($4);
 		}
 		|  abstract_declarator '[' maybe_r ']' attr_var {
-			$$ = block(LB, $1, bcon(NOOFFSET),
-			    INT, 0, gcc_attr_wrapper($5));
+			$$ = block(LB, $1, bcon(NOOFFSET), INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($5);
 		}
 		|  abstract_declarator '[' e ']' attr_var {
-			$$ = block(LB, $1, $3, INT, 0, gcc_attr_wrapper($5));
+			$$ = block(LB, $1, $3, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($5);
 		}
 		|  '(' ')' attr_var {
 			$$ = bdty(UCALL, bdty(NAME, NULL));
 			$$->n_ap = gcc_attr_wrapper($3);
 		}
 		|  '(' ib2 parameter_type_list ')' attr_var {
-			$$ = block(CALL, bdty(NAME, NULL), $3, INT, 0,
-			    gcc_attr_wrapper($5));
+			$$ = block(CALL, bdty(NAME, NULL), $3, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($5);
 		}
 		|  abstract_declarator '(' ')' attr_var {
-			$$ = block(UCALL, $1, NULL, INT, 0, gcc_attr_wrapper($4));
+			$$ = block(UCALL, $1, NULL, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($4);
 		}
 		|  abstract_declarator '(' ib2 parameter_type_list ')' attr_var {
-			$$ = block(CALL, $1, $4, INT, 0, gcc_attr_wrapper($6));
+			$$ = block(CALL, $1, $4, INT, 0, 0);
+			$$->n_ap = gcc_attr_wrapper($6);
 		}
 		;
 
@@ -618,14 +615,14 @@ enum_head:	   C_ENUM { $$ = enumhd(NULL); }
 		|  C_ENUM C_NAME {  $$ = enumhd($2); }
 		;
 
-moe_list:	   moe
-		|  moe_list ',' moe
+moe_list:	   moe { moedef($1, enummer++); }
+		|  moe_list ',' moe { moedef($3, enummer++); }
 		;
 
-moe:		   C_NAME {  moedef($1); }
-		|  C_TYPENAME {  moedef($1); }
-		|  C_NAME '=' e { enummer = con_e($3); moedef($1); }
-		|  C_TYPENAME '=' e { enummer = con_e($3); moedef($1); }
+moe:		   C_NAME
+		|  C_TYPENAME
+		|  C_NAME '=' e { enummer = con_e($3); $$ = $1; }
+		|  C_TYPENAME '=' e { enummer = con_e($3); $$ = $1; }
 		;
 
 struct_dcl:	   str_head '{' struct_dcl_list '}' {
@@ -977,7 +974,7 @@ statement:	   e ';' { ecomp(eve($1)); symclear(blevel); }
 			} else {
 				if (cftnod == NULL) {
 					P1ND *r = tempnode(0, p->n_type,
-					    p->n_df, p->n_ap);
+					    p->n_df, p->pss);
 					cftnod = tmpalloc(sizeof(P1ND));
 					*cftnod = *r;
 					p1tfree(r);
@@ -1197,7 +1194,7 @@ term:		   term C_INCOP {  $$ = biop($2, $1, bcon(1)); }
 		|  C_ALIGNOF xa '(' cast_type ')' {
 			int al;
 			TYMFIX($4);
-			al = talign($4->n_type, $4->n_ap);
+			al = talign($4->n_type, $4->pss);
 			$$ = bcon(al/SZCHAR);
 			inattr = $<intval>2;
 			p1tfree($4);
@@ -1289,9 +1286,9 @@ cast_type:	   specifier_qualifier_list {
 %%
 
 P1ND *
-mkty(TWORD t, union dimfun *d, struct attr *sue)
+mkty(TWORD t, union dimfun *d, struct ssdesc *ss)
 {
-	return block(TYPE, NULL, NULL, t, d, sue);
+	return block(TYPE, NULL, NULL, t, d, ss);
 }
 
 P1ND *
@@ -1446,7 +1443,7 @@ gccexpr(int bn, P1ND *q)
 	q = r->n_right;
 	/* XXX end hack */
 	if (!(q->n_op == ICON && q->n_type == STRTY) && (r->n_type != VOID)) {
-		p = tempnode(0, q->n_type, q->n_df, q->n_ap);
+		p = tempnode(0, q->n_type, q->n_df, q->pss);
 		r = buildtree(ASSIGN, p1tcopy(p), r);
 		r = buildtree(COMOP, r, p);
 	}
@@ -1509,7 +1506,7 @@ addcase(P1ND *p)
 
 	if (DEUNSIGN(swpole->type) != DEUNSIGN(p->n_type)) {
 		val = glval(p);
-		p = makety(p, swpole->type, 0, 0, 0);
+		p = makety(p, mkqtyp(swpole->type));
 		if (p->n_op != ICON)
 			cerror("could not cast case value to type of switch "
 			       "expression");
@@ -1686,7 +1683,7 @@ init_declarator(P1ND *tn, P1ND *p, int assign, P1ND *a, char *as)
 			uerror("cannot initialise function");
 		defid2(p, uclass(class), as);
 		sp = p->n_sp;
-		if (sp->sdf->dfun == 0 && !issyshdr)
+		if (sp->sdf->dlst == 0 && !issyshdr)
 			warner(Wstrict_prototypes);
 		if (parlink) {
 			/* dynamic sized arrays in prototypes */
@@ -1863,7 +1860,7 @@ fundef(P1ND *tp, P1ND *p)
 
 	cftnsp = s;
 	defid(p, class);
-	if (s->sdf->dfun == 0 && !issyshdr)
+	if (s->sdf->dlst == 0 && !issyshdr)
 		warner(Wstrict_prototypes);
 #ifdef GCC_COMPAT
 	if (attr_find(p->n_ap, GCC_ATYP_ALW_INL)) {
@@ -1974,6 +1971,7 @@ clbrace(P1ND *p)
 	sp->stype = p->n_type;
 	sp->squal = p->n_qual;
 	sp->sdf = p->n_df;
+	sp->sss = p->pss;
 	sp->sap = p->n_ap;
 	p1tfree(p);
 	if (blevel == 0 && xnf != NULL) {
@@ -2111,7 +2109,7 @@ static P1ND *
 tyof(P1ND *p)
 {
 	static struct symtab spp;
-	P1ND *q = block(TYPE, NULL, NULL, p->n_type, p->n_df, p->n_ap);
+	P1ND *q = block(TYPE, NULL, NULL, p->n_type, p->n_df, p->pss);
 	q->n_qual = p->n_qual;
 	q->n_sp = &spp; /* for typenode */
 	p1walkf(p, putjops, 0);
@@ -2349,7 +2347,7 @@ eve(P1ND *p)
 
 	case BIQUEST: /* gcc e ?: e op */
 		p1 = eve(p1);
-		r = tempnode(0, p1->n_type, p1->n_df, p1->n_ap);
+		r = tempnode(0, p1->n_type, p1->n_df, p1->pss);
 		p2 = eve(biop(COLON, p1tcopy(r), p2));
 		r = buildtree(QUEST, buildtree(ASSIGN, r, p1), p2);
 		break;

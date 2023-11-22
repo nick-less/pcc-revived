@@ -1,4 +1,4 @@
-/*      $Id: code.c,v 1.31 2022/10/29 09:40:42 gmcgarry Exp $    */
+/*      $Id: code.c,v 1.33 2023/08/11 15:14:09 ragge Exp $    */
 /*
  * Copyright (c) 2007 Gregory McGarry (g.mcgarry@ieee.org).
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
@@ -44,6 +44,13 @@
 #define talloc p1alloc
 #define tcopy p1tcopy
 #define nfree p1nfree
+#define	sap sss
+#undef n_df
+#define n_df pdf
+#undef n_type
+#define n_type ptype
+#undef n_ap
+#define n_ap pss
 #endif
 
 static int rvnr;
@@ -327,7 +334,6 @@ param_struct(struct symtab *sym, int *argofsp)
 void
 bfcode(struct symtab **sp, int cnt)
 {
-	union arglist *usym;
 	int saveallargs = 0;
 	int i, argofs = 0;
 
@@ -335,14 +341,8 @@ bfcode(struct symtab **sp, int cnt)
 	 * Detect if this function has ellipses and save all
 	 * argument registers onto stack.
 	 */
-	usym = cftnsp->sdf->dfun;
-	while (usym && usym->type != TNULL) {
-		if (usym->type == TELLIPSIS) {
-			saveallargs = 1;
-			break;
-		}
-		++usym;
-	}
+	if (cftnsp->sdf->dlst)
+		saveallargs = pr_hasell(cftnsp->sdf->dlst);
 
 	/* if returning a structure, move the hidden argument into a TEMP */
 	if (cftnsp->stype == STRTY+FTN || cftnsp->stype == UNIONTY+FTN) {

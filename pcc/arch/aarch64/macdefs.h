@@ -1,4 +1,4 @@
-/*	$Id: macdefs.h,v 1.2 2021/09/04 10:38:37 gmcgarry Exp $	*/
+/*	$Id: macdefs.h,v 1.4 2023/08/20 15:30:30 ragge Exp $	*/
  /*
  * Copyright (c) 2020 Puresoftware Ltd.
  *

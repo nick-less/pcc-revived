@@ -1,4 +1,4 @@
-/*	$Id: pass1.h,v 1.321 2022/11/29 10:17:18 ragge Exp $	*/
+/*	$Id: pass1.h,v 1.333 2023/10/20 14:08:08 ragge Exp $	*/
 /*
  * Copyright(C) Caldera International Inc. 2001-2002. All rights reserved.
  *
@@ -70,7 +70,8 @@ typedef unsigned int bittype; /* XXX - for basicblock */
 #define TYPEDEF		13
 /* #define FORTRAN		14 */
 #define ENAME		15
-#define MOE		16
+//#define MOE		16
+#define CCONST		16
 /* #define UFORTRAN 	17 */
 #define USTATIC		18
 
@@ -110,34 +111,62 @@ extern	char *scnames(int);
 
 struct rstack;
 struct symtab;
-union arglist;
 #ifdef GCC_COMPAT
 struct gcc_attr_pack;
 #endif
 
 /*
- * Dimension/prototype information.
+ * Type descriptions in pass1 consists of four different parts;
+ *	- The type word (used in pass2 as well).
+ *	- The qual word, (const/vol/...) pass1 only.
+ *	- The dimension/function pointer
+ *	- The size/struct description table pointer.
+ *
+ * The dimfun pointer points into an array of "union dimfun", which is the 
+ * same size as the number of ARY/FTN in the type word.  See below.
+ *
+ * The size/struct description member is only used if needed, unless it is
+ * a struct/union when it always is avaliable.  It has three initial 
+ * elements, thereafter followed by parameters that are allocated if needed.
+ *
+ * Note that some type/variable attributes may be stored in this struct.
+ */
+
+/* size/struct description */
+struct ssdesc {
+	struct symtab *sp;	/* Pointer to linked list of members */
+	int sz;			/* Size of this type */
+	short al;		/* alignment of this type */
+	short nelem;		/* # extra element allocated */
+	int val[];
+};
+
+
+/*
+ * Dimension information.
  * 	ddim > 0 holds the dimension of an array.
  *	ddim < 0 is a dynamic array and refers to a tempnode.
  *	...unless:
  *		ddim == NOOFFSET, an array without dimenston, "[]"
  *		ddim == -1, dynamic array while building before defid.
+ *
+ * Prototypes are kept at an index given in dlst.
  */
 union dimfun {
 	int	ddim;		/* Dimension of an array */
-	union arglist *dfun;	/* Prototype index */
+	int	dlst;		/* prototype index */
 };
 
-/*
- * Argument list member info when storing prototypes.
- */
-union arglist {
-	TWORD type;
-	union dimfun *df;
-	struct attr *sap;
-};
 #define TNULL		INCREF(FARG) /* pointer to FARG -- impossible type */
 #define TELLIPSIS 	INCREF(INCREF(FARG))
+
+/* the type description itself */
+struct tdef {
+	TWORD type;
+	TWORD qual;
+	union dimfun *df;
+	struct ssdesc *ss;
+};
 
 /*
  * Symbol table definition.
@@ -149,13 +178,18 @@ struct	symtab {
 	char	slevel;		/* scope level */
 	short	sflags;		/* flags, see below */
 	char	*sname;		/* Symbol name */
-	TWORD	stype;		/* type word */
-	TWORD	squal;		/* qualifier word */
-	union	dimfun *sdf;	/* ptr to the dimension/prototype array */
+	struct	tdef td[1];
+
 	struct	attr *sap;	/* the base type attribute list */
 };
 
 #define	ISSOU(ty)   ((ty) == STRTY || (ty) == UNIONTY)
+
+/* compat */
+#define stype td->type
+#define squal td->qual
+#define sdf td->df    
+#define sss td->ss    
 
 /*
  * External definitions
@@ -192,6 +226,7 @@ extern	int retlab;
 extern	int doing_init, statinit;
 extern	short sztable[];
 extern	char *astypnames[];
+extern struct tdef tdint[];
 
 /* pragma globals */
 extern int pragma_allpacked, pragma_packed, pragma_aligned;
@@ -236,12 +271,10 @@ struct flt;
 
 typedef struct p1node {
 	int	n_op;
-	TWORD	n_type;
-	TWORD	n_qual;
 	union {
-		char *	_name;
-		union	dimfun *_df;
-	} n_5;
+		struct	tdef n_td[1];
+		struct { int pad[3]; char *_name; } n_5;
+	};
 	struct attr *n_ap;
 	union {
 		struct {
@@ -263,7 +296,10 @@ typedef struct p1node {
 #define slval(p,v)	((p)->n_f.n_u.n_l._val = (v))
 #define	n_ccon		n_f._ccon
 #define	n_scon		n_f._scon
-
+#define	ptype		n_td->type
+#define	pqual		n_td->qual
+#define	pdf		n_td->df
+#define	pss		n_td->ss
 
 /*	mark an offset which is undefined */
 
@@ -272,14 +308,14 @@ typedef struct p1node {
 /* declarations of various functions */
 extern	P1ND
 	*buildtree(int, P1ND *, P1ND *r),
-	*mkty(unsigned, union dimfun *, struct attr *),
+	*mkty(unsigned, union dimfun *, struct ssdesc *),
 	*rstruct(char *, int),
 	*dclstruct(struct rstack *),
 	*strend(char *, TWORD),
 	*tymerge(P1ND *, P1ND *),
 	*stref(P1ND *),
 #ifdef WORD_ADDRESSED
-	*offcon(OFFSZ, TWORD, union dimfun *, struct attr *),
+	*offcon(OFFSZ, struct tdef *),
 #endif
 	*bcon(int),
 	*xbcon(CONSZ, struct symtab *, TWORD),
@@ -288,17 +324,19 @@ extern	P1ND
 	*pconvert(P1ND *),
 	*oconvert(P1ND *),
 	*ptmatch(P1ND *),
-	*makety(P1ND *, TWORD, TWORD, union dimfun *, struct attr *),
-	*block(int, P1ND *, P1ND *, TWORD, union dimfun *, struct attr *),
+	*makety(P1ND *, struct tdef *),
+	*block(int, P1ND *, P1ND *, TWORD, union dimfun *, struct ssdesc *),
+	*blk(int, P1ND *, P1ND *, struct tdef *),
 	*doszof(P1ND *),
 	*p1alloc(void),
 	*optim(P1ND *),
 	*clocal(P1ND *),
-	*tempnode(int, TWORD, union dimfun *, struct attr *),
+	*tempnode(int, TWORD, union dimfun *, struct ssdesc *),
+	*tmpnod(int, struct tdef *),
 	*eve(P1ND *),
 	*doacall(struct symtab *, P1ND *, P1ND *);
 P1ND	*intprom(P1ND *);
-OFFSZ	tsize(TWORD, union dimfun *, struct attr *),
+OFFSZ	tsize(TWORD, union dimfun *, struct ssdesc *),
 	psize(P1ND *);
 P1ND *	typenode(P1ND *new);
 void	spalloc(P1ND *, P1ND *, OFFSZ);
@@ -320,7 +358,7 @@ void inline_args(struct symtab **, int);
 P1ND *inlinetree(struct symtab *, P1ND *, P1ND *);
 void argsave(P1ND *p);
 struct rstack *bstruct(char *, int, P1ND *);
-void moedef(char *);
+void moedef(char *, int);
 void beginit(struct symtab *);
 void simpleinit(struct symtab *, P1ND *);
 struct symtab *lookup(char *, int);
@@ -330,9 +368,8 @@ char *addname(char *);
 void symclear(int);
 struct symtab *hide(struct symtab *);
 void soumemb(P1ND *, char *, int);
-int talign(unsigned int, struct attr *);
+int talign(unsigned int, struct ssdesc *);
 void bfcode(struct symtab **, int);
-int chkftn(union arglist *, union arglist *);
 void branch(int);
 void cbranch(P1ND *, P1ND *);
 void extdec(struct symtab *);
@@ -366,7 +403,9 @@ int cdope(int);
 void myp2tree(P1ND *);
 void lcommprint(void), strprint(void);
 void lcommdel(struct symtab *);
+#ifndef NEWPARAMS
 P1ND *funcode(P1ND *);
+#endif
 struct symtab *enumhd(char *);
 P1ND *enumdcl(struct symtab *);
 P1ND *enumref(char *);
@@ -396,7 +435,7 @@ P1ND *cxcast(P1ND *p1, P1ND *p2);
 P1ND *cxret(P1ND *p, P1ND *q);
 P1ND *imret(P1ND *p, P1ND *q);
 P1ND *cast(P1ND *p, TWORD t, TWORD q);
-P1ND *ccast(P1ND *p, TWORD t, TWORD u, union dimfun *df, struct attr *sue);
+P1ND *ccast(P1ND *p, TWORD t, TWORD u, union dimfun *df, struct ssdesc *);
 int andable(P1ND *);
 int conval(P1ND *, int, P1ND *);
 int ispow2(CONSZ);
@@ -413,8 +452,8 @@ int notlval(P1ND *);
 void ecode(P1ND *p);
 void ftnend(void);
 void dclargs(void);
-int suemeq(struct attr *s1, struct attr *s2);
-struct symtab *strmemb(struct attr *ap);
+int suemeq(struct ssdesc *s1, struct ssdesc *s2);
+struct symtab *strmemb(struct ssdesc *);
 int yylex(void);
 void yyerror(char *);
 int pragmas_gcc(char *t);
@@ -435,6 +474,18 @@ void blkfree(void);
 char *getexname(struct symtab *sp);
 void putjops(P1ND *p, void *arg);
 int tnodenr(struct symtab *);
+P1ND *mkcmplx(P1ND *p, TWORD dt);
+void cxargfixup(P1ND *arg, struct tdef *td);
+int pr_arglst(P1ND *n);
+int pr_ckproto(int usym, int udef, int old);
+void pr_callchk(struct symtab *sp, P1ND *f, P1ND *a);
+void pr_oldstyle(struct symtab **as, int nparams);
+int pr_hasell(int);
+struct tdef *intdef(struct tdef *, TWORD);
+struct tdef *intdefq(TWORD);
+void incref(struct tdef *d, struct tdef *s);
+struct tdef *mkqtyp(TWORD t);
+
 
 void p1walkf(P1ND *, void (*f)(P1ND *, void *), void *);
 void p1fwalk(P1ND *t, void (*f)(P1ND *, int, int *, int *), int down);
@@ -487,10 +538,10 @@ enum {	ATTR_FIRST = ATTR_MI_MAX + 1,
 	ATTR_COMPLEX,	/* Internal definition of complex */
 	xxxATTR_BASETYP,	/* Internal; see below */
 	ATTR_QUALTYP,	/* Internal; const/volatile, see below */
-	ATTR_ALIGNED,	/* Internal; also used as gcc type attribute */
+	xxxATTR_ALIGNED,	/* Internal; also used as gcc type attribute */
 	ATTR_NORETURN,	/* Function does not return */
-	ATTR_STRUCT,	/* Internal; element list */
-#define ATTR_MAX ATTR_STRUCT
+	xxxATTR_STRUCT,	/* Internal; element list */
+#define ATTR_MAX xxxATTR_STRUCT
 
 	ATTR_P1LABELS,	/* used to store stuff while parsing */
 	ATTR_SONAME,	/* output name of symbol */
@@ -573,7 +624,8 @@ enum {	ATTR_FIRST = ATTR_MI_MAX + 1,
  */
 #define amlist  aa[0].varg
 #define amsize  aa[1].iarg
-#define	strattr(x)	(attr_find(x, ATTR_STRUCT))
+// #define	strattr(x)	(attr_find(x, ATTR_STRUCT))
+#define	strattr(x)	((x)->ss)
 
 void gcc_init(void);
 int gcc_keyword(char *);
@@ -621,7 +673,7 @@ void stabs_lbrac(int);
 void stabs_func(struct symtab *);
 void stabs_newsym(struct symtab *);
 void stabs_chgsym(struct symtab *);
-void stabs_struct(struct symtab *, struct attr *);
+void stabs_struct(struct symtab *);
 #endif
 #ifdef DWARF
 void dwarf_init(char *);
@@ -719,7 +771,7 @@ void dwarf_end(void);
 #define	ISFTY(x)	((x) >= FLOAT && (x) <= LDOUBLE)
 #define	ISCTY(x)	((x) >= FCOMPLEX && (x) <= LCOMPLEX)
 #define	ISITY(x)	((x) >= FIMAG && (x) <= LIMAG)
-#define ANYCX(p) (p->n_type == STRTY && attr_find(p->n_ap, ATTR_COMPLEX))
+#define ANYCX(p) (p->ptype == STRTY && attr_find(p->n_ap, ATTR_COMPLEX))
 
 #define coptype(o)	(cdope(o)&TYFLG)
 #define clogop(o)	(cdope(o)&LOGFLG)
@@ -744,3 +796,75 @@ void dwarf_end(void);
 #define FUNALLO(x)	malloc(x)
 #define FUNFREE(x)	free(x)
 #endif
+
+/*
+ * parameter definition struct, filled in for each parameter.
+ *
+ * Flags field is shared between target and common code. Flags:
+ * AV_REG - param is stored in register reg, reg type in rtp
+ * AV_REG2 - param spans over reg and reg2.
+ * AV_STREG - struct in reg/reg2, reg type in rtp
+ * AV_STK - param on stack, offset from fp in off.
+ *  AV_STK_PUSH - param should be pushed on stack instead of written to stack.
+ * AV_GOT_REG - set by target to tell GOT pointer is needed.
+ *
+ * (typ, df, ss) are the type specification for this parameter.
+ * (off, reg, reg2) are set by the target code for this parameter.
+ * p may be set by caller as extra hidden args.
+ */
+struct rdef {
+	int flags;		/* shared between common/target code */
+	int type;		/* set by common code */
+	union dimfun *df;	/* set by common code */
+	struct ssdesc *ss;	/* set by common code */
+	union {
+		P1ND *p;	/* set by target code */
+		struct attr *ap; /* set by common code */
+	};
+	int rtp[2];		/* set by target code */
+	int reg[2];		/* set by target code */
+	int off[2];		/* set by target code */
+};
+#define	AV_REG		001
+#define	AV_REG2		002
+#define	AV_STK		004
+#define	AV_STK_PUSH	010
+#define	AV_STREG	020
+#define	AV_GOT_REG	040
+
+/*
+ * function call parameter definitions.
+ *
+ * For return values the following flags are important:
+ * RV_STRET - Normal struct return; there is a hidden arg0 that tells
+ *	where to store the return value, off has bits from fp.
+ *  RV_ARG0_REG - The hidden arg0 is in a register instead, number in reg[0].
+ *  RV_RETADDR - The hidden arg address is returned in register reg[1].
+ * RV_STREG - Struct return in regs instead (for small structs).
+ *	Register numbers in reg[0/1].
+ * RV_RETREG - Register where to return result from function, in reg[0/1].
+ * RV_CALLEE - The parameter fillin is intended for the callee, not caller.
+ */
+
+struct callspec {
+	struct rdef rv;	/* return value definitions */
+	int setoff;	/* offset of args callee/caller */
+	int stkadj;	/* size to add to stack after call */
+	int nargs;	/* number of args (size of rdef array) for function */
+	struct rdef av[];
+};
+void mycallspec(struct callspec *);
+
+void fun_enter(struct symtab *sp, struct symtab **spp, int nargs);
+void fun_leave(void);
+P1ND *fun_call(P1ND *);
+void setreg(struct rdef *rd, int reg, int tsz, TWORD typ);
+extern int gotreg;
+
+#define	RV_STRET	0001
+#define	RV_ARG0_REG	0002
+#define	RV_ARG0_PUSH	0004
+#define	RV_RETADDR	0010
+#define	RV_STREG	0020
+#define	RV_RETREG	0040
+#define	RV_CALLEE	0100

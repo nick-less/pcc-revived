@@ -1,4 +1,4 @@
-/*	$Id: macdefs.h,v 1.38 2022/03/30 14:11:59 ragge Exp $	*/
+/*	$Id: macdefs.h,v 1.40 2023/08/20 15:30:30 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.

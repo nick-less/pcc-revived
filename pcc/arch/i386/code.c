@@ -1,4 +1,4 @@
-/*	$Id: code.c,v 1.102 2019/11/08 12:47:44 ragge Exp $	*/
+/*	$Id: code.c,v 1.113 2023/10/20 14:08:08 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -32,10 +32,18 @@
 #ifdef LANG_CXX
 #define	p1listf	listf
 #define	p1tfree tfree
+#define	sss sap
+#define	pss n_ap
 #else
 #define	NODE P1ND
 #define	talloc p1alloc
+#undef n_type
+#define n_type ptype
+#undef n_df
+#define n_df pdf
 #endif
+
+
 
 /*
  * Print out assembler segment name.
@@ -111,10 +119,10 @@ defloc(struct symtab *sp)
 	if (!ISFTN(sp->stype)) {
 		if (sp->slevel == 0)
 			printf(PRTPREF "\t.size %s,%d\n", name,
-			    (int)tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR);
+			    (int)tsize(sp->stype, sp->sdf, sp->sss)/SZCHAR);
 		else
 			printf(PRTPREF "\t.size " LABFMT ",%d\n", sp->soffset,
-			    (int)tsize(sp->stype, sp->sdf, sp->sap)/SZCHAR);
+			    (int)tsize(sp->stype, sp->sdf, sp->sss)/SZCHAR);
 	}
 #endif
 	if (sp->slevel == 0)
@@ -122,6 +130,144 @@ defloc(struct symtab *sp)
 	else
 		printf(PRTPREF LABFMT ":\n", sp->soffset);
 }
+
+#ifndef LANG_CXX
+
+static void
+setrd(struct rdef *rd, int reg0, int reg1, int t0, int t1)
+{
+	rd->reg[0] = reg0;
+	rd->reg[1] = reg1;
+	rd->rtp[0] = t0;
+	rd->rtp[1] = t1;
+}
+
+static void
+setstk(struct rdef *rd, int off0, int t0)
+{
+	rd->rtp[0] = t0;
+	rd->off[0] = off0;
+}
+
+static TWORD reparegs[] = { EAX, EDX, ECX };
+static TWORD fastregs[] = { ECX, EDX };
+static TWORD longregs[] = { EAXEDX, EDXECX };
+
+/*
+ * Fill in struct defining how a function call should be handled.
+ */
+void
+mycallspec(struct callspec *cs)
+{
+	extern int argstacksize;
+	int regparmarg, nrarg, parmoff, parmoff2;
+	int t = cs->rv.type;
+	int sz, i;
+	TWORD *regpregs;
+#ifdef GCC_COMPAT
+	struct attr *ap;
+#endif
+
+	parmoff = ARGINIT;
+	nrarg = regparmarg = 0;
+
+#ifdef GCC_COMPAT
+	regpregs = reparegs;
+	if ((ap = attr_find(cs->rv.ap, GCC_ATYP_REGPARM)))
+		regparmarg = ap->iarg(0);
+	if ((ap = attr_find(cs->rv.ap, GCC_ATYP_FASTCALL)))
+		regparmarg = 2, regpregs = fastregs;
+	if (regparmarg > 3)
+		regparmarg = 3;
+#endif
+
+
+	/* Return values */
+	if (ISPTR(t))
+		t = UNSIGNED;
+
+	switch (t) {
+	case STRTY: case UNIONTY: /* struct return */
+		sz = (int)tsize(t, cs->rv.df, cs->rv.ss);
+#if defined(os_openbsd)
+		if (sz <= SZLONGLONG) {
+			/* openbsd returns small structs in regs */
+			cs->rv.flags |= RV_STREG;
+			setrd(&cs->rv, EAX, EDX, UNSIGNED, UNSIGNED);
+		} else
+#endif
+		if (sz == SZLONGLONG && attr_find(cs->rv.ap, ATTR_COMPLEX)) {
+			/* return in eax/edx */
+			cs->rv.flags |= RV_STREG;
+			setrd(&cs->rv, EAX, EDX, UNSIGNED, UNSIGNED);
+		} else {
+			/* return struct in buffer given as hidden arg ptr */
+			cs->rv.flags |= (RV_STRET|RV_RETADDR);
+			setrd(&cs->rv, 0, EAX, UNSIGNED, UNSIGNED);
+			if (regparmarg) {
+				cs->rv.reg[0] = regpregs[nrarg++];
+				cs->rv.flags |= RV_ARG0_REG;
+			} else {
+				setstk(&cs->rv, parmoff, UNSIGNED);
+				parmoff += SZINT;
+			}
+		}
+		break;
+
+	case BOOL: case CHAR: case UCHAR:
+	case SHORT: case USHORT:
+	case INT: case UNSIGNED: case LONG: case ULONG:
+		cs->rv.flags |= RV_RETREG;
+		setrd(&cs->rv, EAX, 0, UNSIGNED, 0);
+		break;
+
+	case LONGLONG: case ULONGLONG:
+		cs->rv.flags |= RV_RETREG;
+		setrd(&cs->rv, EAXEDX, 0, cs->rv.type, 0);
+		break;
+
+	case FLOAT: case DOUBLE: case LDOUBLE:
+		cs->rv.flags |= RV_RETREG;
+		setrd(&cs->rv, 31, 0, cs->rv.type, 0);
+		break;
+
+	case VOID:
+		break;
+
+	default:
+		cerror("mycallspec: %x", t);
+	}
+	parmoff2 = parmoff;
+
+	/* arguments */
+	for (i = 0; i < cs->nargs; i++) {
+		struct rdef *rd = &cs->av[i];
+		sz = (int)tsize(rd->type, rd->df, rd->ss);
+		SETOFF(sz, SZINT);
+
+		rd->rtp[0] = rd->rtp[1] = rd->type;
+		if (cisreg(rd->type) == 0 ||
+		    ((regparmarg - nrarg) * SZINT < sz)) {
+			rd->off[0] = parmoff;
+			parmoff += sz;
+			nrarg = regparmarg;
+			rd->flags |= (AV_STK|AV_STK_PUSH);
+		} else {
+			rd->reg[0] = sz > SZINT ?
+			    longregs[nrarg] : regpregs[nrarg];
+			nrarg += sz/SZINT;
+			rd->flags |= AV_REG;
+		}
+	}
+	if (cs->rv.flags & RV_CALLEE) {
+		argstacksize = (parmoff2 - ARGINIT)/SZCHAR;
+#ifdef notyet
+		argpopsize = parmoff - parmoff2;
+#endif
+	}
+	cs->stkadj = (parmoff-ARGINIT)/SZCHAR;
+}
+#endif
 
 int structrettemp;
 
@@ -132,67 +278,10 @@ int structrettemp;
 void
 efcode(void)
 {
-	extern int gotnr;
-	NODE *p, *q;
-	int sz;
-
-	gotnr = 0;	/* new number for next fun */
-	if (cftnsp->stype != STRTY+FTN && cftnsp->stype != UNIONTY+FTN)
-		return;
-
-	/* struct return for small structs */
-	sz = (int)tsize(BTYPE(cftnsp->stype), cftnsp->sdf, cftnsp->sap);
-#if defined(os_openbsd)
-	if (sz == SZCHAR || sz == SZSHORT || sz == SZINT || sz == SZLONGLONG) {
-#else
-	if (sz == SZLONGLONG && attr_find(cftnsp->sap, ATTR_COMPLEX)) {
+#ifdef LANG_CXX
+	cerror("need return code");
 #endif
-		/* Pointer to struct in eax */
-		if (sz == SZLONGLONG) {
-			q = block(OREG, NIL, NIL, INT, 0, 0);
-			slval(q, 4);
-			p = block(REG, NIL, NIL, INT, 0, 0);
-			p->n_rval = EDX;
-			ecomp(buildtree(ASSIGN, p, q));
-		}
-		if (sz < SZSHORT) sz = CHAR;
-		else if (sz > SZSHORT) sz = INT;
-		else sz = SHORT;
-		q = block(OREG, NIL, NIL, sz, 0, 0);
-		if (sz < SZINT)
-			q = cast(q, INT, 0);
-		p = block(REG, NIL, NIL, INT, 0, 0);
-		p = (buildtree(ASSIGN, p, q));
-		ecomp(p);
-		return;
-	}
-
-	/* Create struct assignment */
-	q = tempnode(structrettemp, PTR+STRTY, 0, cftnsp->sap);
-	q = buildtree(UMUL, q, NIL);
-	p = block(REG, NIL, NIL, PTR+STRTY, 0, cftnsp->sap);
-	p = buildtree(UMUL, p, NIL);
-	p = buildtree(ASSIGN, q, p);
-	ecomp(p);
-
-	/* put hidden arg in eax on return */
-	q = tempnode(structrettemp, INT, 0, 0);
-	p = block(REG, NIL, NIL, INT, 0, 0);
-	regno(p) = EAX;
-	ecomp(buildtree(ASSIGN, p, q));
 }
-
-#ifdef GCC_COMPAT
-static TWORD reparegs[] = { EAX, EDX, ECX };
-static TWORD fastregs[] = { ECX, EDX };
-#endif
-static TWORD longregs[] = { EAXEDX, EDXECX };
-#ifdef NOBREGS
-static TWORD charregs[] = { EAX, EDX, ECX };
-#else
-static TWORD charregs[] = { AL, DL, CL };
-#endif
-static TWORD *regpregs;
 
 /*
  * code for the beginning of a function; a is an array of
@@ -208,186 +297,20 @@ static TWORD *regpregs;
 void
 bfcode(struct symtab **sp, int cnt)
 {
-	extern int argstacksize;
-#ifdef GCC_COMPAT
-	struct attr *ap;
-#endif
-	struct symtab *sp2;
-	extern int gotnr;
-	NODE *n, *p;
-	int i, regparmarg;
-	int argbase, nrarg, sz;
+#ifndef LANG_CXX
+	NODE *p;
 
 	/* Take care of PIC stuff first */
         if (kflag) {
-#define STL     200
-                char *str = xmalloc(STL);
-#if !defined(MACHOABI)
-                int l = getlab();
-#else
-                char *name;
-#endif
-
-                /* Generate extended assembler for PIC prolog */
-                p = tempnode(0, INT, 0, 0);
-                gotnr = regno(p);
-                p = block(XARG, p, NIL, INT, 0, 0);
-                p->n_name = "=g";
-                p = block(XASM, p, bcon(0), INT, 0, 0);
-
-#if defined(MACHOABI)
-		name = getexname(cftnsp);
-                if (snprintf(str, STL, "call L%s$pb\nL%s$pb:\n\tpopl %%0\n",
-                    name, name) >= STL)
-                        cerror("bfcode");
-#else
-                if (snprintf(str, STL,
-                    "call " LABFMT ";" LABFMT ":;\tpopl %%0;"
-                    "\taddl $_GLOBAL_OFFSET_TABLE_+[.-" LABFMT "], %%0;",
-                    l, l, l) >= STL)
-                        cerror("bfcode");
-#endif
-                p->n_name = addstring(str);
-                p->n_right->n_type = STRTY;
-		free(str);
+		NODE *q;
+		p = tempnode(0, INT, 0, 0);
+		gotreg = regno(p);
+		q = block(REG, 0, 0, INT, 0, 0);
+		regno(q) = EBX;
+		p = buildtree(ASSIGN, p, q);
                 ecomp(p);
         }
-
-	argbase = ARGINIT;
-	nrarg = regparmarg = 0;
-	argstacksize = 0;
-
-#ifdef GCC_COMPAT
-	regpregs = reparegs;
-        if ((ap = attr_find(cftnsp->sap, GCC_ATYP_REGPARM)))
-                regparmarg = ap->iarg(0);
-        if ((ap = attr_find(cftnsp->sap, GCC_ATYP_FASTCALL)))
-                regparmarg = 2, regpregs = fastregs;
 #endif
-
-	/* Function returns struct, create return arg node */
-	if (cftnsp->stype == STRTY+FTN || cftnsp->stype == UNIONTY+FTN) {
-		sz = (int)tsize(BTYPE(cftnsp->stype), cftnsp->sdf, cftnsp->sap);
-#if defined(os_openbsd)
-		/* OpenBSD uses non-standard return for small structs */
-		if (sz > SZLONGLONG)
-#else
-		if (sz != SZLONGLONG ||
-		    attr_find(cftnsp->sap, ATTR_COMPLEX) == 0)
-#endif
-		{
-			if (regparmarg) {
-				n = block(REG, 0, 0, INT, 0, 0);
-				regno(n) = regpregs[nrarg++];
-			} else {
-				n = block(OREG, 0, 0, INT, 0, 0);
-				slval(n, argbase/SZCHAR);
-				argbase += SZINT;
-				regno(n) = FPREG;
-				argstacksize += 4; /* popped by callee */
-			}
-			p = tempnode(0, INT, 0, 0);
-			structrettemp = regno(p);
-			p = buildtree(ASSIGN, p, n);
-			ecomp(p);
-		}
-	}
-
-	/*
-	 * Find where all params are so that they end up at the right place.
-	 * At the same time recalculate their arg offset on stack.
-	 * We also get the "pop size" for stdcall.
-	 */
-	for (i = 0; i < cnt; i++) {
-		sp2 = sp[i];
-		sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
-
-		SETOFF(sz, SZINT);
-
-		if (cisreg(sp2->stype) == 0 ||
-		    ((regparmarg - nrarg) * SZINT < sz)) {	/* not in reg */
-			sp2->soffset = argbase;
-			argbase += sz;
-			nrarg = regparmarg;	/* no more in reg either */
-		} else {					/* in reg */
-			sp2->soffset = regpregs[nrarg];
-			nrarg += sz/SZINT;
-			sp2->sclass = REGISTER;
-		}
-	}
-
-	/*
-	 * Now (argbase - ARGINIT) is used space on stack.
-	 * Move (if necessary) the args to something new.
-	 */
-	for (i = 0; i < cnt; i++) {
-		int reg, j;
-
-		sp2 = sp[i];
-
-		if ((ISSOU(sp2->stype) && sp2->sclass == REGISTER) ||
-		    (sp2->sclass == REGISTER && xtemps == 0)) {
-			/* must move to stack */
-			sz = (int)tsize(sp2->stype, sp2->sdf, sp2->sap);
-			SETOFF(sz, SZINT);
-			SETOFF(autooff, SZINT);
-			reg = sp2->soffset;
-			sp2->sclass = AUTO;
-			sp2->soffset = NOOFFSET;
-			oalloc(sp2, &autooff);
-                        for (j = 0; j < sz/SZCHAR; j += 4) {
-                                p = block(OREG, 0, 0, INT, 0, 0);
-                                slval(p, sp2->soffset/SZCHAR + j);
-                                regno(p) = FPREG;
-                                n = block(REG, 0, 0, INT, 0, 0);
-                                regno(n) = regpregs[reg++];
-                                p = block(ASSIGN, p, n, INT, 0, 0);
-                                ecomp(p);
-                        }
-		} else if (cisreg(sp2->stype) && !ISSOU(sp2->stype) &&
-		    ((cqual(sp2->stype, sp2->squal) & VOL) == 0) && xtemps) {
-			/* just put rest in temps */
-			if (sp2->sclass == REGISTER) {
-				n = block(REG, 0, 0, sp2->stype,
-				    sp2->sdf, sp2->sap);
-				if (ISLONGLONG(sp2->stype))
-					regno(n) = longregs[sp2->soffset];
-				else if (DEUNSIGN(sp2->stype) == CHAR ||
-				    sp2->stype == BOOL)
-					regno(n) = charregs[sp2->soffset];
-				else
-					regno(n) = regpregs[sp2->soffset];
-			} else {
-                                n = block(OREG, 0, 0, sp2->stype,
-				    sp2->sdf, sp2->sap);
-                                slval(n, sp2->soffset/SZCHAR);
-                                regno(n) = FPREG;
-			}
-			p = tempnode(0, sp2->stype, sp2->sdf, sp2->sap);
-			sp2->soffset = regno(p);
-			sp2->sflags |= STNODE;
-			n = buildtree(ASSIGN, p, n);
-			ecomp(n);
-		}
-	}
-
-        if (attr_find(cftnsp->sap, GCC_ATYP_STDCALL)) {
-#ifdef PECOFFABI
-                char buf[256];
-                char *name;
-#endif
-		/* XXX interaction STDCALL and struct return? */
-		argstacksize += (argbase - ARGINIT)/SZCHAR;
-#ifdef PECOFFABI
-                /*
-                 * mangle name in symbol table as a callee.
-                 */
-		name = getexname(cftnsp);
-                snprintf(buf, 256, "%s@%d", name, argstacksize);
-                cftnsp->soname = addname(buf);
-#endif
-        }
-
 }
 
 #if defined(MACHOABI)
@@ -440,6 +363,7 @@ bjobcode(void)
 	DLIST_INIT(&nlplist, link);
 #endif
 #if defined(__GNUC__) || defined(__PCC__)
+#ifdef __i386__
 	/* Be sure that the compiler uses full x87 */
 	/* XXX cross-compiling will fail here */
 	volatile int fcw;
@@ -447,149 +371,7 @@ bjobcode(void)
 	fcw |= 0x300;
 	__asm("fldcw (%0)" : : "r"(&fcw));
 #endif
-}
-
-/*
- * Convert FUNARG to assign in case of regparm.
- */
-static int regcvt, rparg, fcall;
-static void
-addreg(NODE *p)
-{
-	TWORD t;
-	NODE *q;
-	int sz, r;
-
-	sz = (int)tsize(p->n_type, p->n_df, p->n_ap)/SZCHAR;
-	sz = (sz + 3) >> 2;	/* sz in regs */
-	if ((regcvt+sz) > rparg) {
-		regcvt = rparg;
-		return;
-	}
-	if (sz > 2)
-		uerror("cannot put struct in 3 regs (yet)");
-
-	if (sz == 2)
-		r = regcvt == 0 ? EAXEDX : EDXECX;
-	else if (fcall)
-		r = regcvt == 0 ? ECX : EDX;
-	else
-		r = regcvt == 0 ? EAX : regcvt == 1 ? EDX : ECX;
-
-	if (p->n_op == FUNARG) {
-		/* at most 2 regs */
-		if (p->n_type < INT) {
-			p->n_left = ccast(p->n_left, INT, 0, 0, 0);
-			p->n_type = INT;
-		}
-
-		p->n_op = ASSIGN;
-		p->n_right = p->n_left;
-	} else if (p->n_op == STARG) {
-		/* convert to ptr, put in reg */
-		q = p->n_left;
-		t = sz == 2 ? LONGLONG : INT;
-		q = cast(q, INCREF(t), 0);
-		q = buildtree(UMUL, q, NIL);
-		p->n_op = ASSIGN;
-		p->n_type = t;
-		p->n_right = q;
-	} else
-		cerror("addreg");
-	p->n_left = block(REG, 0, 0, p->n_type, 0, 0);
-	regno(p->n_left) = r;
-	regcvt += sz;
-}
-
-/*
- * Called with a function call with arguments as argument.
- * This is done early in buildtree() and only done once.
- * Returns p.
- */
-NODE *
-funcode(NODE *p)
-{
-	extern int gotnr;
-	struct attr *ap;
-	NODE *r, *l;
-	TWORD t = DECREF(DECREF(p->n_left->n_type));
-	int stcall;
-
-	stcall = ISSOU(t);
-	/*
-	 * We may have to prepend:
-	 * - Hidden arg0 for struct return (in reg or on stack).
-	 * - ebx in case of PIC code.
-	 */
-
-	/* Fix function call arguments. On x86, just add funarg */
-	for (r = p->n_right; r->n_op == CM; r = r->n_left) {
-		if (r->n_right->n_op != STARG)
-			r->n_right = block(FUNARG, r->n_right, NIL,
-			    r->n_right->n_type, r->n_right->n_df,
-			    r->n_right->n_ap);
-	}
-	if (r->n_op != STARG) {
-		l = talloc();
-		*l = *r;
-		r->n_op = FUNARG;
-		r->n_left = l;
-		r->n_type = l->n_type;
-	}
-#ifdef os_openbsd
-	if (stcall && (ap = strattr(p->n_left->n_ap)) &&
-	    ap->amsize != SZCHAR && ap->amsize != SZSHORT &&
-	    ap->amsize != SZINT && ap->amsize != SZLONGLONG)
-#else
-	if (stcall &&
-	    (attr_find(p->n_left->n_ap, ATTR_COMPLEX) == 0 ||
-	     ((ap = strattr(p->n_left->n_ap)) && ap->amsize > SZLONGLONG)))
 #endif
-	{
-		/* Prepend a placeholder for struct address. */
-		/* Use EBP, can never show up under normal circumstances */
-		l = talloc();
-		*l = *r;
-		r->n_op = CM;
-		r->n_right = l;
-		r->n_type = INT;
-		l = block(REG, 0, 0, INCREF(VOID), 0, 0);
-		regno(l) = EBP;
-		l = block(FUNARG, l, 0, INCREF(VOID), 0, 0);
-		r->n_left = l;
-	}
-
-#ifdef GCC_COMPAT
-	fcall = 0;
-	if ((ap = attr_find(p->n_left->n_ap, GCC_ATYP_REGPARM)))
-		rparg = ap->iarg(0);
-	else if ((ap = attr_find(p->n_left->n_ap, GCC_ATYP_FASTCALL)))
-		fcall = rparg = 2;
-	else
-#endif
-		rparg = 0;
-
-	regcvt = 0;
-	if (rparg)
-		p1listf(p->n_right, addreg);
-
-	if (kflag == 0)
-		return p;
-
-#if defined(ELFABI)
-	/* Create an ASSIGN node for ebx */
-	l = block(REG, NIL, NIL, INT, 0, 0);
-	l->n_rval = EBX;
-	l = buildtree(ASSIGN, l, tempnode(gotnr, INT, 0, 0));
-	if (p->n_right->n_op != CM) {
-		p->n_right = block(CM, l, p->n_right, INT, 0, 0);
-	} else {
-		for (r = p->n_right; r->n_left->n_op == CM; r = r->n_left)
-			;
-		r->n_left = block(CM, l, r->n_left, INT, 0, 0);
-	}
-#endif
-	return p;
 }
 
 /* fix up type of field p */
@@ -670,3 +452,10 @@ builtin_cfa(const struct bitable *bt, NODE *a)
 	return bcon(0);
 }
 
+#ifdef LANG_CXX
+NODE *
+funcode(NODE *p)
+{
+	return p;
+}
+#endif

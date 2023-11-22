@@ -1,4 +1,4 @@
-/*	$Id: local2.c,v 1.194 2022/12/04 17:02:54 ragge Exp $	*/
+/*	$Id: local2.c,v 1.200 2023/09/19 17:06:57 ragge Exp $	*/
 /*
  * Copyright (c) 2003 Anders Magnusson (ragge@ludd.luth.se).
  * All rights reserved.
@@ -116,6 +116,21 @@ prologue(struct interpass_prolog *ipp)
 	addto = (addto + 15) & ~15;	/* stack alignment */
 #endif
 	prtprolog(ipp, addto);
+	if (kflag) {
+#if defined(MACHOABI)
+		printf("	call L%s$pb\n", ipp->ipp_name);
+		printf("L%s$pb:\n", ipp->ipp_name);
+		printf("	popl %%ebx\n");
+#else
+		int l;
+		printf("	call " LABFMT "\n", l = getlab());
+		printf(LABFMT ":\n", l);
+		printf("	popl %%ebx\n");
+		printf("	addl $_GLOBAL_OFFSET_TABLE_+[.-" LABFMT 
+		    "], %%ebx\n", l);
+#endif
+
+	}
 }
 
 void
@@ -371,23 +386,6 @@ ulltofp(NODE *p)
 	printf(LABFMT ":\n", jmplab);
 }
 
-static int
-argsiz(NODE *p)
-{
-	TWORD t = p->n_type;
-
-	if (t < LONGLONG || t == FLOAT || t > BTMASK)
-		return 4;
-	if (t == LONGLONG || t == ULONGLONG || t == DOUBLE)
-		return 8;
-	if (t == LDOUBLE)
-		return 12;
-	if (t == STRTY || t == UNIONTY)
-		return attr_find(p->n_ap, ATTR_P2STRUCT)->iarg(0) & ~3;
-	comperr("argsiz");
-	return 0;
-}
-
 static void
 fcast(NODE *p)
 {
@@ -435,7 +433,7 @@ zzzcode(NODE *p, int c)
 {
 	struct attr *ap;
 	NODE *l;
-	int pr, lr;
+	int pr, lr, i;
 	char *ch;
 
 	switch (c) {
@@ -453,11 +451,11 @@ zzzcode(NODE *p, int c)
 		if (attr_find(p->n_left->n_ap, GCC_ATYP_STDCALL))
 			break;
 #endif
-		pr = p->n_qual;
+		pr = 0;
+		if ((ap = attr_find(p->n_ap, ATTR_STKADJ)))
+			pr = ap->iarg(0);
 		if (attr_find(p->n_ap, ATTR_I386_FPPOP))
 			printf("	fstp	%%st(0)\n");
-		if (p->n_op == UCALL)
-			return; /* XXX remove ZC from UCALL */
 		if (pr)
 			printf("	addl $%d, %s\n", pr, rnames[ESP]);
 #if defined(os_openbsd)
@@ -551,7 +549,7 @@ zzzcode(NODE *p, int c)
 #endif
                 break;
 
-	case 'Q': /* emit struct assign */
+	case 'Q': /* emit struct assign (large structs) */
 		/*
 		 * Put out some combination of movs{b,w,l}
 		 * esi/edi/ecx are available.
@@ -559,7 +557,7 @@ zzzcode(NODE *p, int c)
 		expand(p, INAREG, "	leal AL,%edi\n");
 		ap = attr_find(p->n_ap, ATTR_P2STRUCT);
 		if (ap->iarg(0) < 32) {
-			int i = ap->iarg(0) >> 2;
+			i = ap->iarg(0) >> 2;
 			while (i) {
 				expand(p, INAREG, "	movsl\n");
 				i--;
@@ -572,6 +570,31 @@ zzzcode(NODE *p, int c)
 			printf("	movsw\n");
 		if (ap->iarg(0) & 1)
 			printf("	movsb\n");
+		break;
+
+	case 'R': /* emit struct assign to NAME (small structs) */
+		ap = attr_find(p->n_ap, ATTR_P2STRUCT);
+		l = p->n_left;
+		for (i = 0; i < ap->iarg(0); i += 4) {
+			char buf[200];
+			sprintf(buf, "\tmovl %d(%s),A1\n\tmovl A1,AL+%d\n", 
+			    i, rnames[regno(p->n_right)],
+			    (int)getlval(l)+i);
+			expand(p, INAREG, buf);
+		}
+		break;
+
+	case 'V': /* emit struct assign to OREG (small structs) */
+		ap = attr_find(p->n_ap, ATTR_P2STRUCT);
+		l = p->n_left;
+		expand(p, INAREG, "	leal AL,A2\n");
+		for (i = 0; i < ap->iarg(0); i += 4) {
+			char buf[200];
+			sprintf(buf, "\tmovl %d(%s),A1\n\tmovl A1,%d(%s)\n", 
+			    i, rnames[regno(p->n_right)],
+			    i, rnames[regno(&resc[2])]);
+			expand(p, INAREG, buf);
+		}
 		break;
 
 	case 'S': /* emit eventual move after cast from longlong */
@@ -873,18 +896,9 @@ cbgen(int o, int lab)
 static void
 fixcalls(NODE *p, void *arg)
 {
-	struct attr *ap;
 
 	/* Prepare for struct return by allocating bounce space on stack */
 	switch (p->n_op) {
-	case STCALL:
-	case USTCALL:
-		ap = attr_find(p->n_ap, ATTR_P2STRUCT);
-		if (ap->iarg(0)+p2autooff > stkpos)
-			stkpos = ap->iarg(0)+p2autooff;
-		if (8+p2autooff > stkpos)
-			stkpos = ap->iarg(0)+p2autooff;
-		break;
 	case LS:
 	case RS:
 		if (p->n_type != LONGLONG && p->n_type != ULONGLONG)
@@ -1268,45 +1282,10 @@ gclass(TWORD t)
 }
 
 /*
- * Calculate argument sizes.
  */
 void
 lastcall(NODE *p)
 {
-	NODE *op = p;
-	int nr = 0, size = 0;
-
-	p->n_qual = 0;
-	if (p->n_op != CALL && p->n_op != FORTCALL && p->n_op != STCALL)
-		return;
-	for (p = p->n_right; p->n_op == CM; p = p->n_left) { 
-		if (p->n_right->n_op != ASSIGN)
-			size += argsiz(p->n_right);
-		else
-			nr = 1;
-	}
-	if (p->n_op != ASSIGN)
-		size += argsiz(p);
-	else
-		nr++;
-	if (op->n_op == STCALL) {
-		if (kflag)
-			nr--;
-		if (nr == 0)
-			size -= 4; /* XXX OpenBSD? */
-	}
-
-#if defined(MACHOABI)
-	int newsize = (size + 15) & ~15;	/* stack alignment */
-	int align = newsize-size;
-
-	if (align != 0)
-		printf("	subl $%d,%%esp\n", align);
-
-	size=newsize;
-#endif
-	
-	op->n_qual = size; /* XXX */
 }
 
 /*
@@ -1315,9 +1294,15 @@ lastcall(NODE *p)
 int
 special(NODE *p, int shape)
 {
+	struct attr *ap;
 	int o = p->n_op;
 
 	switch (shape) {
+	case SHSTR:
+		ap = attr_find(p->n_ap, ATTR_P2STRUCT);
+		if (ap->iarg(0) <= 16 && (ap->iarg(0) & 3) == 0)
+			return o != REG ? SRREG : SRDIR;
+		break;
 	case SFUNCALL:
 		if (o == STCALL || o == USTCALL)
 			return SRREG;
